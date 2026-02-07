@@ -6,15 +6,19 @@ Safely clone Codex sessions to the currently configured provider.
 - Interactive TUI by default (no args)
 """
 
+import ast
 import os
 import json
 import uuid
 import argparse
+import platform
 import re
+import shutil
 import sys
 import unicodedata
 from typing import List, Optional, Tuple
 from datetime import datetime
+from pathlib import Path
 
 try:
     import tomllib  # Python 3.11+
@@ -66,18 +70,11 @@ def _is_interactive() -> bool:
     return bool(getattr(sys.stdin, "isatty", lambda: False)() and getattr(sys.stdout, "isatty", lambda: False)())
 
 def _clear_screen() -> None:
-    """清屏：使用 ANSI 转义序列清除整个屏幕。"""
-    if os.environ.get("TERM") or os.name != "nt":
-        # ANSI: 清除整个屏幕(2J) + 移动光标到顶部(H)
-        # 注意顺序：先清屏再移动光标
-        sys.stdout.write("\033[2J\033[H")
-        sys.stdout.flush()
-    else:
-        cmd = "cls" if os.name == "nt" else "clear"
-        try:
-            os.system(cmd)
-        except Exception:
-            pass
+    cmd = "cls" if os.name == "nt" else "clear"
+    try:
+        os.system(cmd)
+    except Exception:
+        pass
 
 def _configure_text_streams() -> None:
     for stream in (sys.stdout, sys.stderr):
@@ -259,7 +256,7 @@ _ASCII_GLYPHS = {
     "ellipsis": "...",
 }
 
-def _glyphs() -> dict:
+def _glyphs():
     if os.environ.get("CSC_ASCII_UI"):
         return _ASCII_GLYPHS
     encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
@@ -270,99 +267,43 @@ def _glyphs() -> dict:
         return _ASCII_GLYPHS
 
 
-# Classic Block-Style ASCII Art Font (直接硬编码，避免压缩逻辑错误)
-# 使用经典的 Figlet "Banner" 风格，每个字符 5 行高
-_LOGO_FONT_BANNER = {
-    "C": [
-        " ████",
-        "█    ",
-        "█    ",
-        "█    ",
-        " ████",
-    ],
-    "O": [
-        " ███ ",
-        "█   █",
-        "█   █",
-        "█   █",
-        " ███ ",
-    ],
-    "D": [
-        "████ ",
-        "█   █",
-        "█   █",
-        "█   █",
-        "████ ",
-    ],
-    "E": [
-        "█████",
-        "█    ",
-        "███  ",
-        "█    ",
-        "█████",
-    ],
-    "X": [
-        "█   █",
-        " █ █ ",
-        "  █  ",
-        " █ █ ",
-        "█   █",
-    ],
-    "S": [
-        " ████",
-        "█    ",
-        " ███ ",
-        "    █",
-        "████ ",
-    ],
-    "I": [
-        "█████",
-        "  █  ",
-        "  █  ",
-        "  █  ",
-        "█████",
-    ],
-    "N": [
-        "█   █",
-        "██  █",
-        "█ █ █",
-        "█  ██",
-        "█   █",
-    ],
-    "L": [
-        "█    ",
-        "█    ",
-        "█    ",
-        "█    ",
-        "█████",
-    ],
-    "R": [
-        "████ ",
-        "█   █",
-        "████ ",
-        "█  █ ",
-        "█   █",
-    ],
-    "-": [
-        "     ",
-        "     ",
-        "█████",
-        "     ",
-        "     ",
-    ],
-    " ": [
-        "  ",
-        "  ",
-        "  ",
-        "  ",
-        "  ",
-    ],
-}
+# Valid chars for packing: A-Z, 0-9, -
+# 'X' is the fill character
+def _unpack_font(packed: dict, height: int) -> dict:
+    out = {}
+    for char, data in packed.items():
+        # Remove whitespace to support multi-line layout in code
+        clean = "".join(data.split())
+        # Split into chunks of length (len(clean) // height)
+        width = len(clean) // height
+        out[char] = [clean[i * width : (i + 1) * width] for i in range(height)]
+    return out
 
-# 字体别名（用于适应不同终端宽度的选择逻辑）
-_LOGO_FONT_4X5 = _LOGO_FONT_BANNER
-_LOGO_FONT_4X7 = _LOGO_FONT_BANNER
-_LOGO_FONT_3X7 = _LOGO_FONT_BANNER
+_FONT_4X5_DATA = {
+    "C": "XXXX  X  X  XXX", "O": "XXXX XX XX XXXX", "D": "XX X XX XX XX", 
+    "E": "XXXX  XX X  XXX", "X": "X  X X X XX  X XX  X", "S": "XXXX  XXX  XXXX",
+    "I": "XXX X  X  X XXX", "N": "X  XXX XX  XX  X", "L": "X  X  X  X  XXX", 
+    "R": "XXX X  XXX X X  X", "-": "            XXX      ",
+}
+_LOGO_FONT_4X5 = _unpack_font(_FONT_4X5_DATA, 5)
+
+_FONT_4X7_DATA = {
+    "C": " XXXX   X   X   X   X    XXX", "O": " XXXX  XX  XX  XX  XX  X XXX",
+    "D": "XXX X  XX  XX  XX  XX  XXXX ", "E": "XXXXX   X   XXX X   X   XXXX",
+    "X": "X  XX  X XX  XX  XX X  XX  X", "S": " XXXX   X    XX    X   XXXX ",
+    "I": "XXXX XX  XX  XX  XX  XX XXXX", "N": "X  XXX XX XX  XX  XX  XX  X",
+    "L": "X   X   X   X   X   X   XXXX", "R": "XXX X  XX  XXXX X X  XX  X",
+    "-": "            XXXX            ",
+}
+_LOGO_FONT_4X7 = _unpack_font(_FONT_4X7_DATA, 7)
+
+_FONT_3X7_DATA = {
+    "C": "XXXX  X  X  X  X  XXX", "O": "XXXX XX XX XX XX XXX", "D": "XX X XX XX XX XX XX",
+    "E": "XXXX  X  XX X  X  XXX", "X": "X XX X X  X  X XX X X", "S": "XXXX  X  XXX  X  XXXX",
+    "I": "XX X  X  X  X  X XX", "N": "X  XXX XX XX  XX  XX  X", "L": "X  X  X  X  X  X  XXX",
+    "R": "XX X XX XXX X X X X X", "-": "         XX         ",
+}
+_LOGO_FONT_3X7 = _unpack_font(_FONT_3X7_DATA, 7)
 
 
 def _can_encode(text: str) -> bool:
@@ -724,7 +665,7 @@ def _app_logo_lines(max_width: Optional[int] = None) -> List[str]:
                 gradient=("#0088FF", "#0000FF"), # Blue -> Dark Blue
             ),
         )
-
+        )
 
     def _try_triple_line(font: dict, *, char_gap: int, min_gap: int) -> Optional[List[str]]:
         codex, session, cloner = _render_parts(font, char_gap=char_gap)
@@ -824,7 +765,7 @@ def _align_line(line: str, width: int, *, center: bool) -> str:
     padding = (max(0, width - _display_width(line))) // 2
     return (" " * padding) + line
 
-def _box_chars() -> dict:
+def _box_chars():
     if os.environ.get("CSC_ASCII_UI"):
         return _ASCII_BOX
     encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
@@ -834,7 +775,7 @@ def _box_chars() -> dict:
     except Exception:
         return _ASCII_BOX
 
-def _render_box(lines, width=None, border_codes=None) -> List[str]:
+def _render_box(lines, width=None, border_codes=None):
     cols = _term_width()
     if width is None:
         width = min(cols, 90)
@@ -865,7 +806,7 @@ def _render_box(lines, width=None, border_codes=None) -> List[str]:
     out.append(bottom_line)
     return out
 
-def _read_key() -> str:
+def _read_key():
     if os.name == "nt":
         try:
             import msvcrt
@@ -961,7 +902,7 @@ def strip_toml_comment(line: str) -> str:
 
     return "".join(out)
 
-def parse_toml_scalar(value: str) -> str:
+def parse_toml_scalar(value: str):
     value = value.strip()
     if not value:
         return None
@@ -978,7 +919,7 @@ def parse_toml_scalar(value: str) -> str:
 
     return value.split()[0]
 
-def get_current_provider() -> str:
+def get_current_provider():
     """Find 'model_provider' in config.toml (robust to whitespace/comments)."""
     if not os.path.exists(CONFIG_FILE):
         return DEFAULT_PROVIDER
@@ -1066,7 +1007,7 @@ def scan_existing_clones(sessions_dir, target_provider):
                         origin_id = payload.get('cloned_from')
                         if origin_id:
                             cloned_from_ids.add(origin_id)
-            except Exception:
+            except:
                 continue
                 
     if UI_LANG == "zh":
@@ -1365,24 +1306,19 @@ def run_tui() -> int:
         input("按 Enter 返回菜单...")
 
     def _render_home(selected_index: int) -> None:
-        """渲染主界面（双缓冲：先构建所有行，再一次性输出）"""
         cols = _term_width()
         box_width = _tui_width(cols)
         glyphs = _glyphs()
         pointer = glyphs.get("pointer", ">")
 
         center = box_width >= 70
-        
-        # === 双缓冲：收集所有输出行 ===
-        output_lines: List[str] = []
-        
         for line in _app_logo_lines(max_width=box_width):
-            output_lines.append(_align_line(line, box_width, center=center))
+            print(_align_line(line, box_width, center=center))
         title = _style("Codex 会话克隆器", Ansi.BOLD, Ansi.CYAN)
         subtitle = _style("↑/↓ 选择 · Enter 执行", Ansi.DIM)
-        output_lines.append(_align_line(title, box_width, center=center))
-        output_lines.append(_align_line(subtitle, box_width, center=center))
-        output_lines.append("")
+        print(_align_line(title, box_width, center=center))
+        print(_align_line(subtitle, box_width, center=center))
+        print("")
 
         selected = items[selected_index]
         preview_cmd = _cli_preview(selected["cli_args"])
@@ -1404,9 +1340,9 @@ def run_tui() -> int:
             info_lines.append(_style("【DRY-RUN】", Ansi.BOLD, Ansi.YELLOW) + "不会创建任何文件。")
 
         for line in _render_box(info_lines, width=box_width, border_codes=(Ansi.DIM, Ansi.BLUE)):
-            output_lines.append(line)
+            print(line)
 
-        output_lines.append("")
+        print("")
 
         menu_lines = []
         for idx, item in enumerate(items):
@@ -1429,15 +1365,15 @@ def run_tui() -> int:
             menu_lines.append(line)
 
         for line in _render_box(menu_lines, width=box_width, border_codes=(Ansi.DIM, Ansi.MAGENTA)):
-            output_lines.append(line)
+            print(line)
 
-        output_lines.append("")
+        print("")
         if os.name == "nt":
             hint = "提示：双击 快速启动.bat 启动；或运行 ./csc-launcher.ps1"
         else:
             hint = "提示：运行 ./csc-launcher.sh 启动（可追加参数，如：--dry-run）"
-        output_lines.append(_style(hint, Ansi.DIM))
-        output_lines.append(
+        print(_style(hint, Ansi.DIM))
+        print(
             _style("按键：", Ansi.DIM)
             + _style("↑/↓", Ansi.BOLD, Ansi.CYAN)
             + _style(" 选择", Ansi.DIM)
@@ -1454,21 +1390,7 @@ def run_tui() -> int:
             + _style("q", Ansi.BOLD, Ansi.CYAN)
             + _style(" 退出", Ansi.DIM)
         )
-        
-        # === 隐藏光标 + 一次性输出 + 显示光标 ===
-        hide_cursor = "\033[?25l"
-        show_cursor = "\033[?25h"
-        home_cursor = "\033[H"
-        clear_to_eol = "\033[K"  # 清除到行尾
-        clear_to_eos = "\033[J"  # 清除到屏幕底部
-        
-        # 每行末尾添加清除到行尾，防止残留
-        full_output = "\n".join(line + clear_to_eol for line in output_lines) + "\n"
-        
-        # 一次性写入：隐藏光标 -> 光标归位 -> 输出内容 -> 清除剩余 -> 显示光标
-        sys.stdout.write(hide_cursor + home_cursor + full_output + clear_to_eos + show_cursor)
         sys.stdout.flush()
-
 
     def _run_action(action_name: str, cli_args, dry_run: bool, runner, danger: bool) -> None:
         cols = _term_width()
@@ -1540,11 +1462,9 @@ def run_tui() -> int:
     try:
         selected = 0
         hotkey_to_index = {item["hotkey"]: idx for idx, item in enumerate(items)}
-        
-        # 只在首次进入时清屏，之后 _render_home 用光标归位实现无闪烁刷新
-        _clear_screen()
 
         while True:
+            _clear_screen()
             _render_home(selected)
 
             key = _read_key()
@@ -1603,7 +1523,7 @@ def run_tui() -> int:
     finally:
         UI_LANG = previous_lang
 
-def main(argv=None) -> int:
+def main(argv=None):
     _configure_text_streams()
     parser = create_arg_parser()
     if argv is None:

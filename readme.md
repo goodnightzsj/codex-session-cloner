@@ -57,36 +57,94 @@
 
 ## 使用方法
 
-### 普通运行（执行克隆）
+### 默认（TUI 模式 / 推荐）
+
+在交互式终端中 **不带参数运行** 会进入 TUI 菜单，更友好地选择：
+
+- Clone（执行克隆）
+- Dry-run（模拟）
+- Clean（清理旧版无标记 clone）
+
+TUI 操作：
+
+- `↑/↓` 选择
+- `Enter` 执行
+- `1-5` 快捷选择
+- `h` 查看帮助
+- `q` 退出
+- `Clean`（删除）在 TUI 中需要输入 `DELETE` 二次确认
+
+#### Windows
+
+- 双击 `快速启动.bat`
+- 或在 PowerShell 中运行：`./csc-launcher.ps1`
+
+#### Linux / macOS
+
+```bash
+chmod +x ./csc-launcher.sh
+./csc-launcher.sh
+```
+
+也可以直接用 Python 运行：
+
+```bash
+python3 codex-session-cloner.py
+```
+
+如果希望在交互终端里 **跳过 TUI** 直接执行克隆：
+
+```bash
+python3 codex-session-cloner.py --no-tui
+```
+
+可选环境变量：
+
+- `NO_COLOR=1` 关闭颜色输出
+- `CSC_ASCII_UI=1` 强制 ASCII 边框（不支持 Unicode 时可用）
+- `CSC_TUI_MAX_WIDTH=120` 限制 TUI 最大宽度（超宽终端可用）
+
+> TUI 顶部的 Logo 会根据终端宽度自适配：优先显示一行 `CODEX SESSION CLONER` 字符画（宽终端更疏朗）；中等宽度会自动切换为更紧凑的字符画字体；过窄时会继续降级（最窄为 `CSC` 字符画 + 小字脚本名）。
+
+启动脚本同样支持 **参数透传**（带参数时会直接走 CLI，不进菜单）：
+
+- Windows：`./csc-launcher.ps1 --dry-run`
+- Linux/macOS：`./csc-launcher.sh --clean --dry-run`
+
+> 非交互环境（例如管道/CI）下无参数运行不会进入 TUI，会按原逻辑直接执行克隆。
+
+---
+
+### 普通运行（执行克隆 / CLI）
 
 ~~~bash
-python codex-session-cloner.py
+python3 codex-session-cloner.py
 ~~~
 
 ---
 
-### Dry Run（强烈推荐首次使用）
+### Dry Run（强烈推荐首次使用 / CLI）
 
 ~~~bash
-python codex-session-cloner.py --dry-run
+python3 codex-session-cloner.py --dry-run
 ~~~
 
 仅显示将要执行的操作，不会创建或删除任何文件。
 
 ---
 
-### 清理旧版未标记的 Clone
+### 清理旧版未标记的 Clone（CLI）
 
 用于清理 **早期版本脚本生成，但没有 `cloned_from` 字段** 的 session。
 
 ~~~bash
-python codex-session-cloner.py --clean
+python3 codex-session-cloner.py --clean
 ~~~
 
 同样支持 dry-run：
 
 ~~~bash
-python codex-session-cloner.py --clean --dry-run
+python3 codex-session-cloner.py --clean --dry-run
 ~~~
 
 ---
