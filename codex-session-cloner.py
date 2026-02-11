@@ -13,6 +13,10 @@ import argparse
 import re
 import sys
 import unicodedata
+import shutil
+import ast
+import platform
+from pathlib import Path
 from typing import List, Optional, Tuple
 from datetime import datetime
 
@@ -1204,7 +1208,7 @@ def scan_for_cleanup(sessions_dir, target_provider, dry_run=False):
                     else:
                         # This is an original source
                         originals_by_ts[ts] = True
-            except:
+            except Exception:
                 continue
 
     # 2. Correlate
@@ -1248,7 +1252,7 @@ def extract_timestamp_from_filename(filename):
                 len(parts[-3]) == 4 and len(parts[-4]) == 4 and len(parts[-5]) == 8):
                 return "-".join(parts[:-5])
         return None
-    except:
+    except Exception:
         return None
 
 def run_clone(dry_run: bool) -> int:
