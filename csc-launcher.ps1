@@ -13,9 +13,9 @@ param(
 $ErrorActionPreference = "Stop"
 
 function Resolve-PythonCommand {
-    if (Get-Command "python" -ErrorAction SilentlyContinue) { return @("python") }
-    if (Get-Command "py" -ErrorAction SilentlyContinue) { return @("py", "-3") }
-    if (Get-Command "python3" -ErrorAction SilentlyContinue) { return @("python3") }
+    if (Get-Command "python" -ErrorAction SilentlyContinue) { return ,@("python") }
+    if (Get-Command "py" -ErrorAction SilentlyContinue) { return ,@("py", "-3") }
+    if (Get-Command "python3" -ErrorAction SilentlyContinue) { return ,@("python3") }
     return $null
 }
 
