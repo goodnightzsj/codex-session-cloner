@@ -1,3 +1,16 @@
 .ace-tool/
 __pycache__/
 *.pyc
+.DS_Store
+codex_sessions/
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+build/
+dist/
+*.egg-info/

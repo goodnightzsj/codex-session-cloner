@@ -1,0 +1,7 @@
+.github export-ignore
+tests export-ignore
+scripts/compat export-ignore
+scripts/release export-ignore
+Makefile export-ignore
+release.sh export-ignore
+.gitignore export-ignore

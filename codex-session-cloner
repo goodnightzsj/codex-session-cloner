@@ -1,0 +1,45 @@
+#!/usr/bin/env sh
+set -eu
+
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+PACKAGE_NAME="codex_session_cloner"
+VENV_DIR="${VENV_DIR:-$SCRIPT_DIR/.venv}"
+VENV_COMMAND="$VENV_DIR/bin/codex-session-cloner"
+SRC_DIR="$SCRIPT_DIR/src"
+
+if [ -x "$VENV_COMMAND" ]; then
+  echo "============================================="
+  echo " Codex Session Cloner - Launcher (Local Venv)"
+  echo "============================================="
+  echo ">> $VENV_COMMAND $*"
+  exec "$VENV_COMMAND" "$@"
+fi
+
+if [ ! -d "$SRC_DIR/$PACKAGE_NAME" ]; then
+  echo "Error: cannot find package source at $SRC_DIR/$PACKAGE_NAME" >&2
+  echo "Tip: run ./install.sh first, or keep the src/ tree intact." >&2
+  exit 1
+fi
+
+cd "$SCRIPT_DIR"
+
+PYTHON_BIN="${PYTHON_BIN:-}"
+if [ -z "$PYTHON_BIN" ]; then
+  if command -v python3 >/dev/null 2>&1; then
+    PYTHON_BIN="python3"
+  elif command -v python >/dev/null 2>&1; then
+    PYTHON_BIN="python"
+  else
+    echo "Error: python3/python not found in PATH." >&2
+    echo "Tip: install Python 3 first, then rerun ./install.sh." >&2
+    exit 127
+  fi
+fi
+
+echo "============================================="
+echo " Codex Session Cloner - Launcher (Source Mode)"
+echo "============================================="
+echo ">> $PYTHON_BIN -m $PACKAGE_NAME $*"
+
+export PYTHONPATH="$SRC_DIR${PYTHONPATH:+:$PYTHONPATH}"
+exec "$PYTHON_BIN" -m "$PACKAGE_NAME" "$@"

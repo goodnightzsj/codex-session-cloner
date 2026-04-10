@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codex-session-cloner"
+description = "Codex session clone, bundle transfer, and desktop repair toolkit."
+readme = "readme.md"
+requires-python = ">=3.8"
+dependencies = []
+dynamic = ["version"]
+
+[project.scripts]
+codex-session-cloner = "codex_session_cloner.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.dynamic]
+version = {attr = "codex_session_cloner.__version__"}
