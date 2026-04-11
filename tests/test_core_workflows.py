@@ -2,6 +2,7 @@ import json
 import os
 import shlex
 import sqlite3
+import sys
 import tempfile
 import unittest
 from contextlib import contextmanager
@@ -10,8 +11,8 @@ from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 SRC_DIR = ROOT_DIR / "src"
-if str(SRC_DIR) not in os.sys.path:
-    os.sys.path.insert(0, str(SRC_DIR))
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
 
 from codex_session_toolkit.paths import CodexPaths  # noqa: E402
 from codex_session_toolkit.models import BundleSummary  # noqa: E402
