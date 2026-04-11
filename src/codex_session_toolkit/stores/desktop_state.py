@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import sys
+import tempfile
 from pathlib import Path
 
 from ..errors import ToolkitError
@@ -35,8 +37,18 @@ def ensure_desktop_workspace_root(workspace_dir: str, state_file: Path) -> bool:
     data["electron-saved-workspace-roots"] = saved
     data["project-order"] = project_order
 
-    with state_file.open("w", encoding="utf-8") as fh:
-        json.dump(data, fh, ensure_ascii=False, separators=(",", ":"))
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    tmp_fd, tmp_path = tempfile.mkstemp(dir=str(state_file.parent), suffix=".tmp")
+    try:
+        with os.fdopen(tmp_fd, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, ensure_ascii=False, separators=(",", ":"))
+        os.replace(tmp_path, str(state_file))
+    except BaseException:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
     return True
 
 
@@ -140,45 +152,43 @@ def upsert_threads_table(
     archived = 1 if "/archived_sessions/" in str(target_rollout) else 0
     archived_at = iso_to_epoch(updated_iso) if archived else None
 
-    conn = sqlite3.connect(state_db)
-    cur = conn.cursor()
-    row = cur.execute("select name from sqlite_master where type='table' and name='threads'").fetchone()
-    if not row:
-        conn.close()
-        return False
+    with sqlite3.connect(state_db) as conn:
+        cur = conn.cursor()
+        row = cur.execute("select name from sqlite_master where type='table' and name='threads'").fetchone()
+        if not row:
+            return False
 
-    columns = [r[1] for r in cur.execute("pragma table_info(threads)").fetchall()]
-    data = {
-        "id": session_id,
-        "rollout_path": str(target_rollout),
-        "created_at": iso_to_epoch(created_iso),
-        "updated_at": iso_to_epoch(updated_iso),
-        "source": source_name or ("vscode" if effective_kind == "desktop" else "cli" if effective_kind == "cli" else "unknown"),
-        "model_provider": model_provider,
-        "cwd": cwd,
-        "title": title,
-        "sandbox_policy": sandbox_policy,
-        "approval_mode": approval_mode,
-        "tokens_used": 0,
-        "has_user_event": 1,
-        "archived": archived,
-        "archived_at": archived_at,
-        "cli_version": cli_version,
-        "first_user_message": first_user_message or title,
-        "memory_mode": "enabled",
-        "model": model,
-        "reasoning_effort": reasoning_effort,
-    }
+        columns = [r[1] for r in cur.execute("pragma table_info(threads)").fetchall()]
+        data = {
+            "id": session_id,
+            "rollout_path": str(target_rollout),
+            "created_at": iso_to_epoch(created_iso),
+            "updated_at": iso_to_epoch(updated_iso),
+            "source": source_name or ("vscode" if effective_kind == "desktop" else "cli" if effective_kind == "cli" else "unknown"),
+            "model_provider": model_provider,
+            "cwd": cwd,
+            "title": title,
+            "sandbox_policy": sandbox_policy,
+            "approval_mode": approval_mode,
+            "tokens_used": 0,
+            "has_user_event": 1,
+            "archived": archived,
+            "archived_at": archived_at,
+            "cli_version": cli_version,
+            "first_user_message": first_user_message or title,
+            "memory_mode": "enabled",
+            "model": model,
+            "reasoning_effort": reasoning_effort,
+        }
 
-    insert_cols = [c for c in data if c in columns]
-    placeholders = ", ".join("?" for _ in insert_cols)
-    col_list = ", ".join(insert_cols)
-    update_cols = [c for c in insert_cols if c != "id"]
-    update_sql = ", ".join(f"{c}=excluded.{c}" for c in update_cols)
-    values = [data[c] for c in insert_cols]
+        insert_cols = [c for c in data if c in columns]
+        placeholders = ", ".join("?" for _ in insert_cols)
+        col_list = ", ".join(insert_cols)
+        update_cols = [c for c in insert_cols if c != "id"]
+        update_sql = ", ".join(f"{c}=excluded.{c}" for c in update_cols)
+        values = [data[c] for c in insert_cols]
 
-    sql = f"insert into threads ({col_list}) values ({placeholders}) on conflict(id) do update set {update_sql}"
-    cur.execute(sql, values)
-    conn.commit()
-    conn.close()
+        sql = f"insert into threads ({col_list}) values ({placeholders}) on conflict(id) do update set {update_sql}"
+        cur.execute(sql, values)
+        conn.commit()
     return True

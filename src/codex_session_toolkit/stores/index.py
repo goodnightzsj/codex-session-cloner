@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
+import tempfile
 from collections import OrderedDict
 from pathlib import Path
 from typing import Dict, Optional
@@ -102,9 +104,18 @@ def upsert_session_index(index_file: Path, session_id: str, thread_name: str, up
     }
 
     index_file.parent.mkdir(parents=True, exist_ok=True)
-    with index_file.open("w", encoding="utf-8") as fh:
-        for obj in entries.values():
-            fh.write(json.dumps(obj, ensure_ascii=False, separators=(",", ":")) + "\n")
+    tmp_fd, tmp_path = tempfile.mkstemp(dir=str(index_file.parent), suffix=".tmp")
+    try:
+        with os.fdopen(tmp_fd, "w", encoding="utf-8") as fh:
+            for obj in entries.values():
+                fh.write(json.dumps(obj, ensure_ascii=False, separators=(",", ":")) + "\n")
+        os.replace(tmp_path, str(index_file))
+    except BaseException:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
     if discarded_invalid_lines:
         print(

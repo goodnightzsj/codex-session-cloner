@@ -9,11 +9,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from ..errors import ToolkitError
 from ..models import CleanupResult, CloneFileResult, CloneRunResult
 from ..paths import CodexPaths
 from ..services.provider import detect_provider
 from ..stores.session_files import (
+    build_canonical_clone_path,
+    extract_session_id_from_filename,
     extract_timestamp_from_rollout_name,
+    is_codex_rollout_compatible,
     iter_session_files,
     parse_jsonl_records,
     read_session_payload,
@@ -38,7 +42,7 @@ def build_clone_index(
         total_files += 1
         try:
             payload = read_session_payload(session_file)
-        except Exception:
+        except ToolkitError:
             continue
 
         if payload.get("model_provider") != provider:
@@ -46,7 +50,8 @@ def build_clone_index(
 
         origin_id = payload.get("cloned_from")
         if isinstance(origin_id, str) and origin_id:
-            cloned_from_ids.add(origin_id)
+            if is_codex_rollout_compatible(paths, session_file, origin_id):
+                cloned_from_ids.add(origin_id)
 
     if not quiet:
         print(f" Done. Found {len(cloned_from_ids)} existing clones out of {total_files} files.")
@@ -69,7 +74,7 @@ def clone_session_file(
 
     try:
         records = parse_jsonl_records(session_file)
-    except Exception as exc:
+    except ToolkitError as exc:
         return CloneFileResult("error", str(exc))
 
     if not records:
@@ -108,14 +113,7 @@ def clone_session_file(
     new_payload["clone_timestamp"] = datetime.now(timezone.utc).isoformat()
     session_meta["payload"] = new_payload
 
-    old_filename = session_file.name
-    if current_id in old_filename:
-        new_filename = old_filename.replace(current_id, new_id, 1)
-    else:
-        timestamp = extract_timestamp_from_rollout_name(old_filename)
-        new_filename = f"rollout-{timestamp}-{new_id}.jsonl" if timestamp else f"rollout-CLONE-{new_id}.jsonl"
-
-    new_file_path = session_file.with_name(new_filename)
+    new_file_path = build_canonical_clone_path(paths, session_file, session_meta, payload, new_id)
     if new_file_path.exists():
         return CloneFileResult("skipped_exists", "Target file collision")
 
@@ -127,12 +125,13 @@ def clone_session_file(
             output_lines.append(raw)
 
     if not dry_run:
+        new_file_path.parent.mkdir(parents=True, exist_ok=True)
         with new_file_path.open("w", encoding="utf-8") as fh:
             fh.writelines(output_lines)
 
     already_cloned_ids.add(current_id)
     action_prefix = "[DRY-RUN] Would create" if dry_run else "Created"
-    message = f"{action_prefix} {new_filename} (from {current_provider or 'unknown'})"
+    message = f"{action_prefix} {new_file_path.name} (from {current_provider or 'unknown'})"
     return CloneFileResult("cloned", message, new_file_path)
 
 
@@ -186,8 +185,8 @@ def cleanup_clones(
 ) -> CleanupResult:
     provider = detect_provider(paths, explicit=target_provider)
 
-    originals_by_ts: set[str] = set()
-    targets_without_tag_by_ts: dict[str, list[Path]] = {}
+    originals_by_ts: dict[str, set[str]] = {}
+    targets_without_tag_by_ts: dict[str, list[tuple[Path, str]]] = {}
     files_checked = 0
 
     for session_file in iter_session_files(paths, active_only=active_only):
@@ -196,23 +195,29 @@ def cleanup_clones(
         if not timestamp:
             continue
 
+        session_id = extract_session_id_from_filename(session_file.name) or ""
+
         try:
             payload = read_session_payload(session_file)
-        except Exception:
+        except ToolkitError:
             continue
 
         current_provider = payload.get("model_provider", "")
         cloned_from = payload.get("cloned_from")
         if current_provider == provider:
             if not isinstance(cloned_from, str) or not cloned_from:
-                targets_without_tag_by_ts.setdefault(timestamp, []).append(session_file)
+                targets_without_tag_by_ts.setdefault(timestamp, []).append((session_file, session_id))
         else:
-            originals_by_ts.add(timestamp)
+            originals_by_ts.setdefault(timestamp, set()).add(session_id)
 
     files_to_delete: list[Path] = []
-    for timestamp, paths_for_ts in targets_without_tag_by_ts.items():
-        if timestamp in originals_by_ts:
-            files_to_delete.extend(paths_for_ts)
+    for timestamp, entries in targets_without_tag_by_ts.items():
+        original_ids = originals_by_ts.get(timestamp)
+        if not original_ids:
+            continue
+        for file_path, sid in entries:
+            if sid and sid not in original_ids:
+                files_to_delete.append(file_path)
 
     deleted = []
     errors = []

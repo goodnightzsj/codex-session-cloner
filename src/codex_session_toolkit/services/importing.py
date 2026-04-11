@@ -97,7 +97,10 @@ def import_session(
 
     state_db = paths.latest_state_db()
     desktop_env = paths.state_file.exists() or state_db is not None
-    target_desktop_model_provider = detect_provider(paths) if desktop_env else ""
+    try:
+        target_desktop_model_provider = detect_provider(paths) if desktop_env else ""
+    except Exception:
+        target_desktop_model_provider = ""
     auto_desktop_compat = session_kind == "cli" and desktop_env
 
     prepared_fd, prepared_path = tempfile.mkstemp(prefix="codex-import-session.")
