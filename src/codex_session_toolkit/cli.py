@@ -9,24 +9,22 @@ import sys
 from typing import Optional, Sequence
 
 from . import APP_COMMAND, APP_DISPLAY_NAME, __version__
-from .core import (
-    CodexPaths,
-    ToolkitError,
-    detect_provider,
-    run_cli as run_toolkit_cli,
+from .commands import run_cli as run_toolkit_cli
+from .errors import ToolkitError
+from .paths import CodexPaths
+from .services.provider import detect_provider
+from .tui.app import (
+    ToolkitAppContext,
+    run_cleanup_mode,
+    run_clone_mode,
+    run_tui,
 )
-from .terminal_ui import (
+from .tui.terminal import (
     Ansi,
     configure_text_streams as _configure_text_streams,
     horizontal_rule as _hr,
     is_interactive_terminal as _is_interactive,
     style_text as _style,
-)
-from .tui_app import (
-    ToolkitAppContext,
-    run_cleanup_mode,
-    run_clone_mode,
-    run_tui,
 )
 
 # Configuration
@@ -69,14 +67,14 @@ def create_arg_parser() -> argparse.ArgumentParser:
             "  clone-provider        Clone active sessions to the current provider\n"
             "  clean-clones          Remove legacy unmarked clone files\n"
             "  list                  Browse local sessions\n"
-            "  list-bundles          Browse exported bundle directories\n"
-            "  validate-bundles      Validate bundle repository health\n"
+            "  list-bundles          Browse exported bundle folders\n"
+            "  validate-bundles      Validate bundle folder health\n"
             "  export                Export one session bundle\n"
             "  export-desktop-all    Batch export all Desktop sessions\n"
             "  export-active-desktop-all Batch export all active Desktop sessions\n"
             "  export-cli-all        Batch export all CLI sessions\n"
             "  import                Import one bundle\n"
-            "  import-desktop-all    Batch import Desktop bundles\n"
+            "  import-desktop-all    Batch import one machine/category folder\n"
             "  repair-desktop        Repair Desktop visibility/index/provider\n\n"
             "Legacy flags still work:\n"
             "  --dry-run             Preview clone mode\n"

@@ -3,7 +3,7 @@ set -eu
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 PROJECT_ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)"
-APP_NAME="codex-session-cloner"
+APP_NAME="codex-session-toolkit"
 VENV_DIR="${VENV_DIR:-$PROJECT_ROOT/.venv}"
 EDITABLE=0
 FORCE=0
@@ -80,7 +80,7 @@ if [ "$FORCE" -eq 1 ] && [ -d "$VENV_DIR" ]; then
 fi
 
 echo "============================================="
-echo " Codex Session Cloner - Installer (Unix)"
+echo " Codex Session Toolkit - Installer (Unix)"
 echo "============================================="
 echo "Project:   $PROJECT_ROOT"
 echo "Python:    $PYTHON_BIN"
@@ -110,8 +110,8 @@ if ! install_package; then
 fi
 
 chmod +x \
-  "$PROJECT_ROOT/codex-session-cloner" \
-  "$PROJECT_ROOT/codex-session-cloner.command" \
+  "$PROJECT_ROOT/codex-session-toolkit" \
+  "$PROJECT_ROOT/codex-session-toolkit.command" \
   "$PROJECT_ROOT/install.sh" \
   "$PROJECT_ROOT/install.command" \
   "$PROJECT_ROOT/release.sh"
@@ -119,6 +119,6 @@ chmod +x \
 echo ""
 echo "Install complete."
 echo "Run now:"
-echo "  ./codex-session-cloner"
+echo "  ./codex-session-toolkit"
 echo "Version:"
 echo "  $VENV_DIR/bin/$APP_NAME --version"

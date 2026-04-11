@@ -11,24 +11,26 @@ from __future__ import annotations
 import os
 import sys
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Callable, List, Optional, Sequence, Tuple
 
-from . import APP_COMMAND
-from .core import (
-    BundleSummary,
-    CodexPaths,
-    SessionSummary,
-    ToolkitError,
-    build_clone_index,
-    cleanup_clones,
-    clone_session_file,
-    clone_to_provider,
-    collect_known_bundle_summaries,
-    collect_session_summaries,
-    run_cli as run_toolkit_cli,
+from .. import APP_COMMAND
+from ..commands import run_cli as run_toolkit_cli
+from ..errors import ToolkitError
+from ..models import BundleSummary, SessionSummary
+from ..paths import CodexPaths
+from ..presenters.reports import (
+    print_cleanup_result,
+    print_clone_run_result,
 )
-from .terminal_ui import (
+from ..services.browse import get_session_summaries
+from ..services.clone import cleanup_clones, clone_to_provider
+from ..stores.bundles import (
+    EXPORT_GROUP_ORDER,
+    bundle_export_group_label,
+    collect_known_bundle_summaries,
+    latest_distinct_bundle_summaries,
+)
+from .terminal import (
     Ansi,
     align_line,
     app_logo_lines,
@@ -49,8 +51,8 @@ class ToolkitAppContext:
     target_provider: str
     active_sessions_dir: str
     config_path: str
-    bundle_root_label: str = "./codex_sessions/bundles"
-    desktop_bundle_root_label: str = "./codex_sessions/desktop_bundles"
+    bundle_root_label: str = "./codex_sessions"
+    desktop_bundle_root_label: str = "./codex_sessions"
     entry_command: str = APP_COMMAND
 
 
@@ -72,20 +74,55 @@ class TuiMenuSection:
     border_codes: Tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class BundleBrowserSnapshot:
+    entries: List[BundleSummary]
+    machine_options: List[Tuple[str, str]]
+    export_group_options: List[Tuple[str, str]]
+    current_machine_label: str
+    current_export_group_label: str
+
+
+@dataclass(frozen=True)
+class BatchBundleImportSelection:
+    entries: List[BundleSummary]
+    machine_filter: str
+    machine_label: str
+    export_group_filter: str
+    export_group_label: str
+    latest_only: bool
+
+
+@dataclass(frozen=True)
+class BundleMachineFolderOption:
+    machine_key: str
+    machine_label: str
+    bundle_count: int
+    export_groups: Tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class BundleCategoryFolderOption:
+    export_group: str
+    export_group_label: str
+    bundle_count: int
+    entries: List[BundleSummary]
+
+
 TUI_ACTION_NOTES = {
     "clone": ["会为非当前 provider 的会话生成带血缘信息的新副本。"],
     "clone_dry": ["只预览将创建哪些 clone，不写入任何文件。"],
     "clean": ["删除早期版本生成、但没有 cloned_from 标记的旧副本。", "执行前需要输入 DELETE 二次确认。"],
     "clean_dry": ["只预览哪些旧副本会被删除。"],
     "list_sessions": ["内置会话浏览器，支持过滤、预览和详情查看。"],
-    "browse_bundles": ["独立浏览 Bundle 仓库，而不是只在导入时顺手选择。", "支持来源过滤、详情查看和直接导入。"],
-    "validate_bundles": ["扫描 Bundle 仓库里的 manifest、session JSONL 和 history JSONL。", "适合在批量导入前先找出坏包。"],
-    "export_one": ["从会话列表中选择要导出的 session。", "默认归档到 ./codex_sessions/bundles/single_exports/<timestamp>/。"],
-    "export_desktop_all": ["默认归档到 ./codex_sessions/desktop_bundles/desktop_all_batches/<timestamp>/。", "范围包含 active + archived 的 Desktop 会话，并分别生成 Bundle。"],
-    "export_desktop_active": ["默认归档到 ./codex_sessions/desktop_bundles/desktop_active_batches/<timestamp>/。", "仅导出 ~/.codex/sessions/ 下的 Desktop 会话，不会扫描 ~/.codex/archived_sessions/。"],
-    "export_cli_all": ["默认归档到 ./codex_sessions/bundles/cli_batches/<timestamp>/。", "范围包含 active + archived 的 CLI 会话，并分别生成 Bundle。"],
-    "import_one": ["从 Bundle 列表中选择要导入为会话的条目。", "可选：自动创建缺失工作目录。", "导入时会顺手修复 history / index / Desktop 元数据。"],
-    "import_desktop_all": ["默认从 ./codex_sessions/desktop_bundles/ 递归导入全部 Desktop Bundle 为会话。", "可选：自动创建缺失工作目录。"],
+    "browse_bundles": ["独立浏览 Bundle 导出记录，而不是只在导入时顺手选择。", "默认显示全部历史，支持按导出方式、机器和最新视图切换。"],
+    "validate_bundles": ["扫描 Bundle 导出目录里的 manifest、session JSONL 和 history JSONL。", "适合在批量导入前先找出坏包。"],
+    "export_one": ["从会话列表中选择要导出的 session。", "默认归档到 ./codex_sessions/<machine>/single/<timestamp>/。"],
+    "export_desktop_all": ["默认归档到 ./codex_sessions/<machine>/desktop/<timestamp>/。", "范围包含 active + archived 的 Desktop 会话，并分别生成 Bundle。"],
+    "export_desktop_active": ["默认归档到 ./codex_sessions/<machine>/active/<timestamp>/。", "仅导出 ~/.codex/sessions/ 下的 Desktop 会话，不会扫描 ~/.codex/archived_sessions/。"],
+    "export_cli_all": ["默认归档到 ./codex_sessions/<machine>/cli/<timestamp>/。", "范围包含 active + archived 的 CLI 会话，并分别生成 Bundle。"],
+    "import_one": ["从 Bundle 列表中选择要导入为会话的条目。", "可先按导出机器和导出方式筛选。", "导入时会顺手修复 history / index / Desktop 元数据。"],
+    "import_desktop_all": ["先选择设备文件夹，再选择该设备下的分类文件夹，然后批量导入。", "分类文件夹会显示为 desktop / active / cli / single。", "可选：自动创建缺失工作目录。"],
     "repair_desktop": ["对齐 provider、重建 session_index、补 threads 表与工作区根目录。"],
     "repair_desktop_dry": ["只预览将修改哪些会话和索引，不真正写入。"],
     "repair_desktop_cli": ["会把旧 CLI 线程改写成 Desktop 兼容元数据。"],
@@ -94,17 +131,17 @@ TUI_ACTION_NOTES = {
 }
 
 SECTION_NOTES = {
-    "provider": [
-        "切换 provider 后继续复用会话。",
-        "包含 clone 与旧版副本清理两类动作。",
+    "session": [
+        "聚焦本机会话浏览与单会话操作。",
+        "适合先定位会话，再做单会话导出或查看详情。",
     ],
-    "browse": [
-        "浏览本机会话与 Bundle 仓库。",
-        "包含导出、导入与跨设备迁移入口。",
+    "bundle": [
+        "聚焦 Bundle 导出记录与跨设备迁移。",
+        "包含浏览、校验、批量导出与批量导入。",
     ],
     "repair": [
-        "修复 Desktop 可见性与索引一致性。",
-        "适合处理 threads / provider / workspace roots 问题。",
+        "聚焦 provider 迁移、旧副本清理与 Desktop 修复。",
+        "适合处理 provider / index / threads / workspace roots 问题。",
     ],
 }
 
@@ -113,19 +150,19 @@ FIXED_THEME_LOGO_WIDTH = 100
 
 def build_tui_menu_actions() -> List[TuiMenuAction]:
     return [
-        TuiMenuAction("clone", "1", "克隆到当前 provider", "provider", ("clone-provider",)),
-        TuiMenuAction("clone_dry", "2", "模拟克隆（Dry-run）", "provider", ("clone-provider", "--dry-run"), is_dry_run=True),
-        TuiMenuAction("clean", "3", "清理旧版无标记副本", "provider", ("clean-clones",), is_dangerous=True),
-        TuiMenuAction("clean_dry", "4", "模拟清理旧版副本", "provider", ("clean-clones", "--dry-run"), is_dangerous=True, is_dry_run=True),
-        TuiMenuAction("list_sessions", "l", "浏览最近会话", "browse", ("list", "--limit", "20")),
-        TuiMenuAction("browse_bundles", "o", "浏览 Bundle 仓库", "browse", ("list-bundles", "--limit", "20")),
-        TuiMenuAction("validate_bundles", "y", "校验 Bundle 仓库", "browse", ("validate-bundles", "--source", "all")),
-        TuiMenuAction("export_one", "e", "导出单个会话为 Bundle", "browse", ("export", "<session_id>")),
-        TuiMenuAction("export_desktop_all", "b", "批量导出全部 Desktop 会话为 Bundle", "browse", ("export-desktop-all",)),
-        TuiMenuAction("export_desktop_active", "a", "批量导出全部 Active Desktop 会话为 Bundle", "browse", ("export-active-desktop-all",)),
-        TuiMenuAction("export_cli_all", "c", "批量导出全部 CLI 会话为 Bundle", "browse", ("export-cli-all",)),
-        TuiMenuAction("import_one", "i", "导入单个 Bundle 为会话", "browse", ("import", "<session_id|bundle_dir>")),
-        TuiMenuAction("import_desktop_all", "m", "批量导入全部 Desktop Bundle 为会话", "browse", ("import-desktop-all",)),
+        TuiMenuAction("list_sessions", "l", "浏览最近会话", "session", ("list", "--limit", "20")),
+        TuiMenuAction("export_one", "e", "导出单个会话为 Bundle", "session", ("export", "<session_id>")),
+        TuiMenuAction("browse_bundles", "o", "浏览 Bundle", "bundle", ("list-bundles", "--limit", "20")),
+        TuiMenuAction("validate_bundles", "y", "校验 Bundle", "bundle", ("validate-bundles", "--source", "all")),
+        TuiMenuAction("export_desktop_all", "b", "批量导出全部 Desktop 会话为 Bundle", "bundle", ("export-desktop-all",)),
+        TuiMenuAction("export_desktop_active", "a", "批量导出全部 Active Desktop 会话为 Bundle", "bundle", ("export-active-desktop-all",)),
+        TuiMenuAction("export_cli_all", "c", "批量导出全部 CLI 会话为 Bundle", "bundle", ("export-cli-all",)),
+        TuiMenuAction("import_one", "i", "导入单个 Bundle 为会话", "bundle", ("import", "<session_id|bundle_dir>")),
+        TuiMenuAction("import_desktop_all", "m", "批量导入 Bundle 为会话", "bundle", ("import-desktop-all",)),
+        TuiMenuAction("clone", "1", "克隆到当前 provider", "repair", ("clone-provider",)),
+        TuiMenuAction("clone_dry", "2", "模拟克隆（Dry-run）", "repair", ("clone-provider", "--dry-run"), is_dry_run=True),
+        TuiMenuAction("clean", "3", "清理旧版无标记副本", "repair", ("clean-clones",), is_dangerous=True),
+        TuiMenuAction("clean_dry", "4", "模拟清理旧版副本", "repair", ("clean-clones", "--dry-run"), is_dangerous=True, is_dry_run=True),
         TuiMenuAction("repair_desktop", "r", "修复 Desktop 可见性", "repair", ("repair-desktop",)),
         TuiMenuAction("repair_desktop_dry", "v", "模拟修复 Desktop", "repair", ("repair-desktop", "--dry-run"), is_dry_run=True),
         TuiMenuAction("repair_desktop_cli", "x", "修复并纳入 CLI 线程", "repair", ("repair-desktop", "--include-cli")),
@@ -136,23 +173,23 @@ def build_tui_menu_actions() -> List[TuiMenuAction]:
 
 def build_tui_menu_sections() -> List[TuiMenuSection]:
     return [
-        TuiMenuSection("Provider / Clone", "provider", (Ansi.DIM, Ansi.CYAN)),
-        TuiMenuSection("Browse / Bundle", "browse", (Ansi.DIM, Ansi.MAGENTA)),
-        TuiMenuSection("Desktop Repair", "repair", (Ansi.DIM, Ansi.GREEN)),
+        TuiMenuSection("Session / Browse", "session", (Ansi.DIM, Ansi.CYAN)),
+        TuiMenuSection("Bundle / Transfer", "bundle", (Ansi.DIM, Ansi.MAGENTA)),
+        TuiMenuSection("Repair / Maintenance", "repair", (Ansi.DIM, Ansi.GREEN)),
     ]
 
 
 def format_bundle_source_label(source_group: str) -> str:
     return {
-        "all": "全部来源",
-        "bundle": "Bundle",
-        "desktop": "Desktop Bundle",
+        "all": "全部分类",
+        "bundle": "bundle 分类",
+        "desktop": "desktop 分类",
     }.get(source_group, source_group)
 
 
 def run_clone_mode(*, target_provider: str, dry_run: bool) -> int:
     try:
-        return int(clone_to_provider(CodexPaths(), target_provider=target_provider, dry_run=dry_run))
+        return print_clone_run_result(clone_to_provider(CodexPaths(), target_provider=target_provider, dry_run=dry_run))
     except ToolkitError as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -167,7 +204,7 @@ def run_cleanup_mode(
     if delete_warning and not dry_run:
         print(style_text(delete_warning, Ansi.BOLD, Ansi.YELLOW))
     try:
-        return int(cleanup_clones(CodexPaths(), target_provider=target_provider, dry_run=dry_run))
+        return print_cleanup_result(cleanup_clones(CodexPaths(), target_provider=target_provider, dry_run=dry_run))
     except ToolkitError as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -253,7 +290,7 @@ class ToolkitTuiApp:
             return Ansi.RED
         if menu_action.is_dry_run:
             return Ansi.YELLOW
-        if menu_action.section_id == "browse":
+        if menu_action.section_id == "bundle":
             return Ansi.MAGENTA
         if menu_action.section_id == "repair":
             return Ansi.GREEN
@@ -265,7 +302,7 @@ class ToolkitTuiApp:
         return TUI_ACTION_NOTES.get(menu_action.action_id, [])
 
     def _section_color(self, menu_section: TuiMenuSection) -> str:
-        if menu_section.section_id == "browse":
+        if menu_section.section_id == "bundle":
             return Ansi.MAGENTA
         if menu_section.section_id == "repair":
             return Ansi.GREEN
@@ -288,14 +325,143 @@ class ToolkitTuiApp:
     def _bundle_detail_lines(self, bundle: BundleSummary) -> List[str]:
         return [
             f"{style_text('Session ID', Ansi.DIM)} : {bundle.session_id}",
-            f"{style_text('来源分组', Ansi.DIM)}  : {format_bundle_source_label(bundle.source_group)}",
-            f"{style_text('Bundle 路径', Ansi.DIM)}: {bundle.bundle_dir}",
-            f"{style_text('Rollout 相对路径', Ansi.DIM)} : {bundle.relative_path or '（空）'}",
-            f"{style_text('会话类型', Ansi.DIM)}  : {bundle.session_kind or '（空）'}",
+            f"{style_text('导出机器', Ansi.DIM)}  : {bundle.source_machine or '（旧布局）'}",
+            f"{style_text('导出方式', Ansi.DIM)}  : {bundle.export_group_label or '（未识别）'}",
             f"{style_text('导出时间', Ansi.DIM)}  : {bundle.exported_at or '（空）'}",
-            f"{style_text('更新时间', Ansi.DIM)}  : {bundle.updated_at or '（空）'}",
+            f"{style_text('Bundle 路径', Ansi.DIM)}: {bundle.bundle_dir}",
+            f"{style_text('会话类型', Ansi.DIM)}  : {bundle.session_kind or '（空）'}",
             f"{style_text('工作目录', Ansi.DIM)}  : {bundle.session_cwd or '（空）'}",
-            f"{style_text('标题预览', Ansi.DIM)}  : {bundle.thread_name or '（空）'}",
+            f"{style_text('标题', Ansi.DIM)}      : {bundle.thread_name or '（无标题）'}",
+            f"{style_text('Rollout 路径', Ansi.DIM)} : {bundle.relative_path or '（空）'}",
+        ]
+
+    def _bundle_browser_snapshot(
+        self,
+        *,
+        filter_text: str,
+        machine_filter: str,
+        export_group_filter: str,
+        latest_only: bool,
+        source_group: str = "all",
+        limit: int = 240,
+    ) -> Tuple[BundleBrowserSnapshot, str, str]:
+        all_entries = collect_known_bundle_summaries(
+            self.paths,
+            pattern="",
+            limit=None,
+            source_group=source_group,
+        )
+        machine_options = [("", "全部机器")]
+        seen_machine_keys = {""}
+        for bundle in all_entries:
+            machine_key = bundle.source_machine_key or ""
+            if machine_key in seen_machine_keys:
+                continue
+            machine_options.append((machine_key, bundle.source_machine or machine_key))
+            seen_machine_keys.add(machine_key)
+
+        normalized_machine_filter = machine_filter if machine_filter in seen_machine_keys else ""
+
+        export_group_options = [("", "全部导出方式")]
+        seen_export_groups = {""}
+        for export_group in EXPORT_GROUP_ORDER:
+            if export_group in seen_export_groups:
+                continue
+            if any(
+                bundle.export_group == export_group
+                and (not normalized_machine_filter or bundle.source_machine_key == normalized_machine_filter)
+                for bundle in all_entries
+            ):
+                export_group_options.append((export_group, bundle_export_group_label(export_group)))
+                seen_export_groups.add(export_group)
+        for bundle in all_entries:
+            export_group = bundle.export_group or ""
+            if not export_group or export_group in seen_export_groups:
+                continue
+            if normalized_machine_filter and bundle.source_machine_key != normalized_machine_filter:
+                continue
+            export_group_options.append((export_group, bundle.export_group_label or bundle_export_group_label(export_group)))
+            seen_export_groups.add(export_group)
+
+        normalized_export_group_filter = export_group_filter if export_group_filter in seen_export_groups else ""
+        entries = collect_known_bundle_summaries(
+            self.paths,
+            pattern=filter_text,
+            limit=limit,
+            source_group=source_group,
+            machine_filter=normalized_machine_filter,
+            export_group_filter=normalized_export_group_filter,
+        )
+        if latest_only:
+            entries = latest_distinct_bundle_summaries(entries)
+
+        return (
+            BundleBrowserSnapshot(
+                entries=entries,
+                machine_options=machine_options,
+                export_group_options=export_group_options,
+                current_machine_label=next(
+                    (label for key, label in machine_options if key == normalized_machine_filter),
+                    "全部机器",
+                ),
+                current_export_group_label=next(
+                    (label for key, label in export_group_options if key == normalized_export_group_filter),
+                    "全部导出方式",
+                ),
+            ),
+            normalized_machine_filter,
+            normalized_export_group_filter,
+        )
+
+    def _bundle_machine_folder_options(self) -> List[BundleMachineFolderOption]:
+        summaries = collect_known_bundle_summaries(self.paths, pattern="", limit=None, source_group="all")
+        grouped: dict[str, dict[str, object]] = {}
+        for bundle in summaries:
+            machine_key = bundle.source_machine_key or ""
+            machine_label = bundle.source_machine or "旧布局"
+            if machine_key not in grouped:
+                grouped[machine_key] = {
+                    "label": machine_label,
+                    "count": 0,
+                    "groups": [],
+                }
+            grouped[machine_key]["count"] = int(grouped[machine_key]["count"]) + 1
+            groups = grouped[machine_key]["groups"]
+            if isinstance(groups, list) and bundle.export_group and bundle.export_group not in groups:
+                groups.append(bundle.export_group)
+
+        return [
+            BundleMachineFolderOption(
+                machine_key=machine_key,
+                machine_label=str(payload["label"]),
+                bundle_count=int(payload["count"]),
+                export_groups=tuple(group for group in EXPORT_GROUP_ORDER if group in payload["groups"]),
+            )
+            for machine_key, payload in grouped.items()
+        ]
+
+    def _bundle_category_folder_options(self, machine_key: str) -> List[BundleCategoryFolderOption]:
+        summaries = collect_known_bundle_summaries(
+            self.paths,
+            pattern="",
+            limit=None,
+            source_group="all",
+            machine_filter=machine_key,
+        )
+        grouped: dict[str, List[BundleSummary]] = {}
+        for bundle in summaries:
+            grouped.setdefault(bundle.export_group, []).append(bundle)
+
+        ordered_groups = [group for group in EXPORT_GROUP_ORDER if group in grouped]
+        ordered_groups.extend(group for group in grouped if group not in ordered_groups)
+        return [
+            BundleCategoryFolderOption(
+                export_group=export_group,
+                export_group_label=bundle_export_group_label(export_group),
+                bundle_count=len(grouped[export_group]),
+                entries=grouped[export_group],
+            )
+            for export_group in ordered_groups
         ]
 
     def _prompt_value(
@@ -357,44 +523,16 @@ class ToolkitTuiApp:
         print("")
         input(style_text("按 Enter 返回...", Ansi.DIM))
 
-    def _run_session_clone_action(self, session_file: str, *, dry_run: bool) -> int:
-        try:
-            already_cloned = build_clone_index(self.paths, target_provider=self.context.target_provider, quiet=True)
-            action, message, _ = clone_session_file(
-                self.paths,
-                Path(session_file),
-                target_provider=self.context.target_provider,
-                already_cloned_ids=already_cloned,
-                dry_run=dry_run,
-            )
-        except ToolkitError as exc:
-            action = "error"
-            message = str(exc)
-
-        color = Ansi.CYAN
-        if action == "cloned":
-            color = Ansi.GREEN if not dry_run else Ansi.YELLOW
-        elif action == "error":
-            color = Ansi.RED
-        elif action.startswith("skipped"):
-            color = Ansi.YELLOW
-
-        print(style_text(f"结果：{action}", Ansi.BOLD, color))
-        print(message)
-        return 0 if action != "error" else 1
-
     def _session_action_center(self, summary: SessionSummary) -> None:
         pointer = glyphs().get("pointer", ">")
         actions = [
             {"key": "e", "label": "导出该会话为 Bundle", "color": Ansi.MAGENTA},
-            {"key": "c", "label": "克隆到当前 provider", "color": Ansi.CYAN},
-            {"key": "t", "label": "模拟克隆（Dry-run）", "color": Ansi.YELLOW},
             {"key": "q", "label": "返回", "color": Ansi.DIM},
         ]
         selected_index = 0
 
         while True:
-            box_width = self._print_branded_header("会话详情 / 动作中心")
+            box_width = self._print_branded_header("会话详情 / 导出")
             for line in render_box(self._session_detail_lines(summary), width=box_width, border_codes=(Ansi.DIM, Ansi.BLUE)):
                 print(line)
             print("")
@@ -409,11 +547,11 @@ class ToolkitTuiApp:
             for line in render_box(action_lines, width=box_width, border_codes=(Ansi.DIM, Ansi.MAGENTA)):
                 print(line)
             print("")
-            print(style_text("按键：↑/↓ 选择 · Enter 执行 · e/c/t 快捷 · q 返回", Ansi.DIM))
+            print(style_text("按键：↑/↓ 选择 · Enter 执行 · e 快捷 · q 返回", Ansi.DIM))
 
             key = read_key()
             if key is None:
-                raw = input("命令 [Enter/e/c/t/q]：").strip()
+                raw = input("命令 [Enter/e/q]：").strip()
                 key = raw if raw else "ENTER"
 
             if key in ("UP", "k", "K"):
@@ -435,25 +573,6 @@ class ToolkitTuiApp:
                     danger=False,
                 )
                 continue
-            if action_key == "c":
-                self._run_action(
-                    f"克隆会话 {summary.session_id}",
-                    ["clone-provider"],
-                    dry_run=False,
-                    runner=lambda path=str(summary.path): self._run_session_clone_action(path, dry_run=False),
-                    danger=False,
-                    preview_cmd=f"TUI selected-session clone -> {summary.session_id}",
-                )
-                continue
-            if action_key == "t":
-                self._run_action(
-                    f"模拟克隆 {summary.session_id}",
-                    ["clone-provider", "--dry-run"],
-                    dry_run=True,
-                    runner=lambda path=str(summary.path): self._run_session_clone_action(path, dry_run=True),
-                    danger=False,
-                    preview_cmd=f"TUI selected-session clone (dry-run) -> {summary.session_id}",
-                )
 
     def _bundle_action_center(self, bundle: BundleSummary) -> None:
         pointer = glyphs().get("pointer", ">")
@@ -465,7 +584,7 @@ class ToolkitTuiApp:
         selected_index = 0
 
         while True:
-            box_width = self._print_branded_header("Bundle 详情 / 动作中心")
+            box_width = self._print_branded_header("Bundle 详情 / 导入")
             for line in render_box(self._bundle_detail_lines(bundle), width=box_width, border_codes=(Ansi.DIM, Ansi.GREEN)):
                 print(line)
             print("")
@@ -522,15 +641,20 @@ class ToolkitTuiApp:
 
         while True:
             try:
-                entries = collect_session_summaries(self.paths, pattern=filter_text, limit=200)
+                entries = get_session_summaries(self.paths, pattern=filter_text, limit=200)
             except ToolkitError as exc:
                 self._show_detail_panel("读取会话失败", [str(exc)], border_codes=(Ansi.DIM, Ansi.RED))
                 return None
 
             selected_index = max(0, min(selected_index, len(entries) - 1)) if entries else 0
+            subtitle = (
+                "↑/↓ 选择 · Enter 打开导出面板 · / 过滤 · e 直接导出 · d 查看详情 · q 返回"
+                if mode == "view"
+                else "↑/↓ 选择 · Enter 确认 · / 过滤 · d 查看详情 · q 返回"
+            )
             box_width = self._print_branded_header(
                 "浏览本机会话" if mode == "view" else "选择要导出的会话",
-                "↑/↓ 选择 · Enter 打开/确认 · / 过滤 · e 导出 · c 克隆 · t 模拟 · d 详情 · q 返回",
+                subtitle,
             )
 
             info_lines = [
@@ -568,7 +692,8 @@ class ToolkitTuiApp:
 
             key = read_key()
             if key is None:
-                raw = input("命令 [Enter/\\/e/c/t/d/q]：").strip()
+                raw_prompt = "命令 [Enter/\\/e/d/q]：" if mode == "view" else "命令 [Enter/\\/d/q]："
+                raw = input(raw_prompt).strip()
                 key = raw if raw else "ENTER"
 
             if key in ("UP", "k", "K"):
@@ -605,7 +730,7 @@ class ToolkitTuiApp:
                 filter_text = new_filter or ""
                 selected_index = 0
                 continue
-            if key_str == "e" and entries:
+            if key_str == "e" and entries and mode == "view":
                 selected = entries[selected_index]
                 self._run_action(
                     f"导出会话 {selected.session_id} 为 Bundle",
@@ -615,64 +740,51 @@ class ToolkitTuiApp:
                     danger=False,
                 )
                 continue
-            if key_str == "c" and entries:
-                selected = entries[selected_index]
-                self._run_action(
-                    f"克隆会话 {selected.session_id}",
-                    ["clone-provider"],
-                    dry_run=False,
-                    runner=lambda path=str(selected.path): self._run_session_clone_action(path, dry_run=False),
-                    danger=False,
-                    preview_cmd=f"TUI selected-session clone -> {selected.session_id}",
-                )
-                continue
-            if key_str == "t" and entries:
-                selected = entries[selected_index]
-                self._run_action(
-                    f"模拟克隆 {selected.session_id}",
-                    ["clone-provider", "--dry-run"],
-                    dry_run=True,
-                    runner=lambda path=str(selected.path): self._run_session_clone_action(path, dry_run=True),
-                    danger=False,
-                    preview_cmd=f"TUI selected-session clone (dry-run) -> {selected.session_id}",
-                )
-                continue
             if key_str in {"d", " "} and entries:
                 selected = entries[selected_index]
-                if mode == "view":
-                    self._session_action_center(selected)
-                else:
-                    self._show_detail_panel("会话详情", self._session_detail_lines(selected))
+                self._show_detail_panel("会话详情", self._session_detail_lines(selected))
 
-    def _open_bundle_browser(self, *, mode: str) -> Optional[BundleSummary]:
+    def _open_bundle_browser(self, *, mode: str, source_group: str = "all") -> Optional[BundleSummary]:
         filter_text = ""
         selected_index = 0
-        source_group = "all"
+        export_group_filter = ""
+        machine_filter = ""
+        latest_only = False
         pointer = glyphs().get("pointer", ">")
 
         while True:
             try:
-                entries = collect_known_bundle_summaries(
-                    self.paths,
-                    pattern=filter_text,
-                    limit=240,
+                snapshot, machine_filter, export_group_filter = self._bundle_browser_snapshot(
+                    filter_text=filter_text,
+                    machine_filter=machine_filter,
+                    export_group_filter=export_group_filter,
+                    latest_only=latest_only,
                     source_group=source_group,
                 )
+                entries = snapshot.entries
             except ToolkitError as exc:
                 self._show_detail_panel("读取 Bundle 失败", [str(exc)], border_codes=(Ansi.DIM, Ansi.RED))
                 return None
 
             selected_index = max(0, min(selected_index, len(entries) - 1)) if entries else 0
+            subtitle = (
+                "↑/↓ 选择 · Enter 打开导入面板 · / 过滤 · s 切换导出方式 · m 切换机器 · "
+                "l 切换历史视图 · i 导入 · v 自动建目录 · d 查看详情 · q 返回"
+                if mode == "view"
+                else "↑/↓ 选择 · Enter 确认 · / 过滤 · s 切换导出方式 · m 切换机器 · "
+                "l 切换历史视图 · d 查看详情 · q 返回"
+            )
             box_width = self._print_branded_header(
-                "浏览 Bundle 仓库" if mode == "view" else "选择要导入的 Bundle",
-                "↑/↓ 选择 · Enter 打开/确认 · / 过滤 · s 切换来源 · i 导入 · v 自动建目录 · d 详情 · q 返回",
+                "浏览 Bundle" if mode == "view" else "选择要导入的 Bundle",
+                subtitle,
             )
 
             info_lines = [
                 f"{style_text('过滤词', Ansi.DIM)} : {filter_text or '（无）'}",
                 f"{style_text('匹配数量', Ansi.DIM)} : {len(entries)}",
-                f"{style_text('来源筛选', Ansi.DIM)} : {format_bundle_source_label(source_group)}",
-                f"{style_text('仓库根目录', Ansi.DIM)} : {self.context.bundle_root_label} + {self.context.desktop_bundle_root_label}",
+                f"{style_text('导出方式', Ansi.DIM)} : {snapshot.current_export_group_label}",
+                f"{style_text('导出机器', Ansi.DIM)} : {snapshot.current_machine_label}",
+                f"{style_text('历史视图', Ansi.DIM)} : {'每台机器每个会话仅显示最新一份 Bundle' if latest_only else '显示全部历史 Bundle'}",
             ]
             for line in render_box(info_lines, width=box_width, border_codes=(Ansi.DIM, Ansi.BLUE)):
                 print(line)
@@ -680,23 +792,25 @@ class ToolkitTuiApp:
 
             list_lines: List[str] = []
             if not entries:
-                list_lines.append("没有匹配 Bundle。按 / 修改过滤词，按 s 切换来源，或按 q 返回。")
+                list_lines.append("没有匹配 Bundle。按 / 修改过滤词，按 s/m/l 切换视图，或按 q 返回。")
             else:
                 start = max(0, selected_index - 5)
                 start = min(start, max(0, len(entries) - 10))
                 end = min(len(entries), start + 10)
                 for idx in range(start, end):
                     bundle = entries[idx]
-                    title_text = bundle.thread_name or bundle.relative_path or bundle.session_id
-                    source_label = format_bundle_source_label(bundle.source_group)
+                    title_text = bundle.thread_name or "（无标题）"
+                    machine_label = bundle.source_machine or "旧布局"
+                    time_label = (bundle.exported_at or bundle.updated_at or "-")[:19]
                     line = (
                         f"{pointer if idx == selected_index else ' '} "
-                        f"{bundle.session_id} | {source_label} | "
-                        f"{bundle.session_kind or '-'} | {title_text}"
+                        f"{bundle.session_id} | {machine_label} | {bundle.export_group_label or '（未识别）'} | "
+                        f"{time_label} | {title_text}"
                     )
                     if idx == selected_index:
                         list_lines.append(style_text(line, Ansi.BOLD, Ansi.CYAN))
-                        list_lines.append("  " + style_text(ellipsize_middle(str(bundle.bundle_dir), max(10, box_width - 10)), Ansi.DIM))
+                        detail_line = f"{bundle.session_kind or '-'} | {bundle.session_cwd or '（无工作目录）'}"
+                        list_lines.append("  " + style_text(ellipsize_middle(detail_line, max(10, box_width - 10)), Ansi.DIM))
                     else:
                         list_lines.append(line)
             for line in render_box(list_lines, width=box_width, border_codes=(Ansi.DIM, Ansi.GREEN)):
@@ -704,7 +818,12 @@ class ToolkitTuiApp:
 
             key = read_key()
             if key is None:
-                raw = input("命令 [Enter/\\/s/i/v/d/q]：").strip()
+                raw_prompt = (
+                    "命令 [Enter/\\/s/m/l/i/v/d/q]："
+                    if mode == "view"
+                    else "命令 [Enter/\\/s/m/l/d/q]："
+                )
+                raw = input(raw_prompt).strip()
                 key = raw if raw else "ENTER"
 
             if key in ("UP", "k", "K"):
@@ -730,10 +849,10 @@ class ToolkitTuiApp:
                 return None
             if key_str in {"/", "f"}:
                 new_filter = self._prompt_value(
-                    title="浏览 Bundle 仓库" if mode == "view" else "选择要导入的 Bundle",
+                    title="浏览 Bundle" if mode == "view" else "选择要导入的 Bundle",
                     prompt_label="输入过滤词",
                     help_lines=[
-                        "可按 session_id / thread_name / kind / cwd / 路径过滤。",
+                        "可按 session_id / 标题 / 导出方式 / 机器 / kind / cwd / 路径过滤。",
                         "留空表示不过滤。",
                     ],
                     allow_empty=True,
@@ -742,14 +861,28 @@ class ToolkitTuiApp:
                 selected_index = 0
                 continue
             if key_str == "s":
-                source_group = {
-                    "all": "bundle",
-                    "bundle": "desktop",
-                    "desktop": "all",
-                }[source_group]
+                current_index = 0
+                for idx, (candidate_key, _) in enumerate(snapshot.export_group_options):
+                    if candidate_key == export_group_filter:
+                        current_index = idx
+                        break
+                export_group_filter = snapshot.export_group_options[(current_index + 1) % len(snapshot.export_group_options)][0]
                 selected_index = 0
                 continue
-            if key_str == "i" and entries:
+            if key_str == "m":
+                current_index = 0
+                for idx, (candidate_key, _) in enumerate(snapshot.machine_options):
+                    if candidate_key == machine_filter:
+                        current_index = idx
+                        break
+                machine_filter = snapshot.machine_options[(current_index + 1) % len(snapshot.machine_options)][0]
+                selected_index = 0
+                continue
+            if key_str == "l":
+                latest_only = not latest_only
+                selected_index = 0
+                continue
+            if key_str == "i" and entries and mode == "view":
                 bundle = entries[selected_index]
                 self._run_action(
                     f"导入 Bundle {bundle.session_id} 为会话",
@@ -759,7 +892,7 @@ class ToolkitTuiApp:
                     danger=False,
                 )
                 continue
-            if key_str == "v" and entries:
+            if key_str == "v" and entries and mode == "view":
                 bundle = entries[selected_index]
                 self._run_action(
                     f"导入 Bundle {bundle.session_id} 为会话（自动创建目录）",
@@ -771,10 +904,171 @@ class ToolkitTuiApp:
                 continue
             if key_str in {"d", " "} and entries:
                 bundle = entries[selected_index]
-                if mode == "view":
-                    self._bundle_action_center(bundle)
+                self._show_detail_panel("Bundle 详情", self._bundle_detail_lines(bundle), border_codes=(Ansi.DIM, Ansi.GREEN))
+
+    def _select_batch_bundle_import_scope(self) -> Optional[BatchBundleImportSelection]:
+        pointer = glyphs().get("pointer", ">")
+        machine_selected_index = 0
+
+        while True:
+            try:
+                machine_options = self._bundle_machine_folder_options()
+            except ToolkitError as exc:
+                self._show_detail_panel("读取 Bundle 失败", [str(exc)], border_codes=(Ansi.DIM, Ansi.RED))
+                return None
+
+            machine_selected_index = max(0, min(machine_selected_index, len(machine_options) - 1)) if machine_options else 0
+            box_width = self._print_branded_header(
+                "选择设备文件夹",
+                "↑/↓ 选择设备 · Enter 进入该设备的分类文件夹 · d 查看摘要 · q 返回",
+            )
+
+            info_lines = [
+                f"{style_text('导出根目录', Ansi.DIM)} : {self.context.bundle_root_label}",
+                f"{style_text('设备数量', Ansi.DIM)}   : {len(machine_options)}",
+                f"{style_text('下一步', Ansi.DIM)}   : 进入设备后选择 desktop / active / cli / single",
+            ]
+            for line in render_box(info_lines, width=box_width, border_codes=(Ansi.DIM, Ansi.BLUE)):
+                print(line)
+            print("")
+
+            machine_lines: List[str] = []
+            if not machine_options:
+                machine_lines.append("当前没有可用的设备文件夹。")
+            else:
+                start = max(0, machine_selected_index - 5)
+                start = min(start, max(0, len(machine_options) - 10))
+                end = min(len(machine_options), start + 10)
+                for idx in range(start, end):
+                    option = machine_options[idx]
+                    export_groups = " / ".join(option.export_groups) or "（无分类）"
+                    line = (
+                        f"{pointer if idx == machine_selected_index else ' '} "
+                        f"{option.machine_label} | {option.bundle_count} 个 Bundle | {export_groups}"
+                    )
+                    if idx == machine_selected_index:
+                        machine_lines.append(style_text(line, Ansi.BOLD, Ansi.CYAN))
+                    else:
+                        machine_lines.append(line)
+            for line in render_box(machine_lines, width=box_width, border_codes=(Ansi.DIM, Ansi.GREEN)):
+                print(line)
+
+            key = read_key()
+            if key is None:
+                raw = input("命令 [Enter/d/q]：").strip()
+                key = raw if raw else "ENTER"
+
+            if key in ("UP", "k", "K"):
+                if machine_options:
+                    machine_selected_index = (machine_selected_index - 1) % len(machine_options)
+                continue
+            if key in ("DOWN", "j", "J"):
+                if machine_options:
+                    machine_selected_index = (machine_selected_index + 1) % len(machine_options)
+                continue
+
+            key_str = str(key).strip().lower()
+            if key == "ENTER":
+                if not machine_options:
+                    continue
+                selected_machine = machine_options[machine_selected_index]
+            elif key_str in {"q", "quit", "esc", "0"} or key == "ESC":
+                return None
+            elif key_str in {"d", " "} and machine_options:
+                selected_machine = machine_options[machine_selected_index]
+                self._show_detail_panel(
+                    "设备文件夹摘要",
+                    [
+                        f"{style_text('设备', Ansi.DIM)}     : {selected_machine.machine_label}",
+                        f"{style_text('路径', Ansi.DIM)}     : {self.context.bundle_root_label}/{selected_machine.machine_key or selected_machine.machine_label}",
+                        f"{style_text('分类', Ansi.DIM)}     : {' / '.join(selected_machine.export_groups) or '（无）'}",
+                        f"{style_text('Bundle 数', Ansi.DIM)} : {selected_machine.bundle_count}",
+                    ],
+                    border_codes=(Ansi.DIM, Ansi.GREEN),
+                )
+                continue
+            else:
+                continue
+
+            category_selected_index = 0
+            while True:
+                category_options = self._bundle_category_folder_options(selected_machine.machine_key)
+                category_selected_index = max(0, min(category_selected_index, len(category_options) - 1)) if category_options else 0
+                box_width = self._print_branded_header(
+                    "选择分类文件夹",
+                    "↑/↓ 选择分类 · Enter 导入该分类文件夹 · d 查看摘要 · q 返回上一步",
+                )
+
+                info_lines = [
+                    f"{style_text('当前设备', Ansi.DIM)} : {selected_machine.machine_label}",
+                    f"{style_text('分类数量', Ansi.DIM)} : {len(category_options)}",
+                    f"{style_text('导入方式', Ansi.DIM)} : 选中一个分类文件夹后，导入该文件夹下全部 Bundle",
+                ]
+                for line in render_box(info_lines, width=box_width, border_codes=(Ansi.DIM, Ansi.BLUE)):
+                    print(line)
+                print("")
+
+                category_lines: List[str] = []
+                if not category_options:
+                    category_lines.append("这个设备文件夹下没有可导入的分类。按 q 返回。")
                 else:
-                    self._show_detail_panel("Bundle 详情", self._bundle_detail_lines(bundle), border_codes=(Ansi.DIM, Ansi.GREEN))
+                    start = max(0, category_selected_index - 5)
+                    start = min(start, max(0, len(category_options) - 10))
+                    end = min(len(category_options), start + 10)
+                    for idx in range(start, end):
+                        option = category_options[idx]
+                        line = (
+                            f"{pointer if idx == category_selected_index else ' '} "
+                            f"{option.export_group_label} | {option.bundle_count} 个 Bundle"
+                        )
+                        if idx == category_selected_index:
+                            category_lines.append(style_text(line, Ansi.BOLD, Ansi.CYAN))
+                        else:
+                            category_lines.append(line)
+                for line in render_box(category_lines, width=box_width, border_codes=(Ansi.DIM, Ansi.GREEN)):
+                    print(line)
+
+                key = read_key()
+                if key is None:
+                    raw = input("命令 [Enter/d/q]：").strip()
+                    key = raw if raw else "ENTER"
+
+                if key in ("UP", "k", "K"):
+                    if category_options:
+                        category_selected_index = (category_selected_index - 1) % len(category_options)
+                    continue
+                if key in ("DOWN", "j", "J"):
+                    if category_options:
+                        category_selected_index = (category_selected_index + 1) % len(category_options)
+                    continue
+
+                key_str = str(key).strip().lower()
+                if key == "ENTER":
+                    if not category_options:
+                        continue
+                    selected_category = category_options[category_selected_index]
+                    return BatchBundleImportSelection(
+                        entries=selected_category.entries,
+                        machine_filter=selected_machine.machine_key,
+                        machine_label=selected_machine.machine_label,
+                        export_group_filter=selected_category.export_group,
+                        export_group_label=selected_category.export_group_label,
+                        latest_only=False,
+                    )
+                if key_str in {"q", "quit", "esc", "0"} or key == "ESC":
+                    break
+                if key_str in {"d", " "} and category_options:
+                    selected_category = category_options[category_selected_index]
+                    self._show_detail_panel(
+                        "分类文件夹摘要",
+                        [
+                            f"{style_text('设备', Ansi.DIM)}     : {selected_machine.machine_label}",
+                            f"{style_text('分类', Ansi.DIM)}     : {selected_category.export_group_label}",
+                            f"{style_text('Bundle 数', Ansi.DIM)} : {selected_category.bundle_count}",
+                            f"{style_text('分类路径', Ansi.DIM)} : {selected_category.entries[0].bundle_dir.parents[1] if selected_category.entries else '（空）'}",
+                        ],
+                        border_codes=(Ansi.DIM, Ansi.GREEN),
+                    )
 
     def _resolve_menu_action_request(self, menu_action: TuiMenuAction) -> Tuple[Optional[str], Optional[List[str]]]:
         action_name = menu_action.label
@@ -815,17 +1109,24 @@ class ToolkitTuiApp:
             return action_name, args
 
         if menu_action.action_id == "import_desktop_all":
+            selection = self._select_batch_bundle_import_scope()
+            if not selection:
+                return None, None
             desktop_visible = self._confirm_toggle(
-                title="批量导入全部 Desktop Bundle 为会话",
+                title="批量导入 Bundle 为会话",
                 question="如果工作目录缺失，是否自动创建",
                 yes_label="y",
                 no_label="n",
                 default_yes=False,
             )
             args = ["import-desktop-all"]
+            if selection.machine_filter:
+                args.extend(["--machine", selection.machine_filter])
+            if selection.export_group_filter:
+                args.extend(["--export-group", selection.export_group_filter])
             if desktop_visible:
                 args.append("--desktop-visible")
-            action_name = menu_action.label
+            action_name = f"批量导入 {selection.machine_label}/{selection.export_group_label}（{len(selection.entries)} 个 Bundle）"
             if desktop_visible:
                 action_name += "（自动创建目录）"
             return action_name, args
@@ -836,25 +1137,25 @@ class ToolkitTuiApp:
         box_width = self._print_branded_header("帮助 / 使用说明")
         lines = [
             style_text("菜单分组：", Ansi.BOLD),
-            "  Provider / Clone   : provider clone 与旧副本清理",
-            "  Browse / Bundle    : 浏览会话仓库、Bundle 仓库、会话导出为 Bundle 与 Bundle 导入为会话",
-            "  Desktop Repair     : 修复 provider / index / threads / workspace roots",
+            "  Session / Browse   : 浏览本机会话、查看详情、导出单个会话为 Bundle",
+            "  Bundle / Transfer  : 浏览 Bundle、校验 Bundle、批量导出与批量导入",
+            "  Repair / Maintenance : provider clone、旧副本清理、Desktop/CLI 修复",
             "",
             style_text("常用 CLI（更完整的工具链能力）：", Ansi.BOLD),
             "  clone-provider                克隆活动会话到当前 provider",
             "  clean-clones                  清理旧版无标记副本",
             "  list [pattern]                列出本机会话",
-            "  list-bundles [pattern]        列出 Bundle 仓库",
-            "  validate-bundles              校验 Bundle 仓库健康度",
+            "  list-bundles [pattern]        列出 Bundle 导出记录",
+            "  validate-bundles              校验 Bundle 导出目录健康度",
             "  export <session_id>           导出单个会话为 Bundle",
             "  export-desktop-all            批量导出全部 Desktop 会话为 Bundle（含 archived）",
             "  export-active-desktop-all     批量导出全部 Active Desktop 会话为 Bundle",
             "  export-cli-all                批量导出全部 CLI 会话为 Bundle",
             "  import <session_id|bundle_dir> 导入单个 Bundle 为会话",
-            "  import-desktop-all            批量导入全部 Desktop Bundle 为会话",
+            "  import-desktop-all            先选设备文件夹，再选分类文件夹后批量导入",
             "  repair-desktop                修复 Desktop 左侧线程可见性",
             "",
-            style_text("兼容参数（原 cloner 用法仍可继续使用）：", Ansi.BOLD),
+            style_text("兼容入口参数：", Ansi.BOLD),
             "  --dry-run          模拟运行（不写入/不删除）",
             "  --clean            清理旧版无标记副本（删除）",
             "  --no-tui           即使无参数也不进菜单（直接执行克隆）",
@@ -866,12 +1167,14 @@ class ToolkitTuiApp:
             f"  {self._cli_preview(('export-cli-all', '--dry-run'))}",
             f"  {self._cli_preview(('export', '019d582f-e8f4-7ce3-9948-c0406b4faaf2'))}",
             f"  {self._cli_preview(('import-desktop-all',))}",
+            f"  {self._cli_preview(('import-desktop-all', '--machine', 'Work-Laptop', '--export-group', 'active'))}",
             f"  {self._cli_preview(('repair-desktop', '--dry-run'))}",
             "",
             style_text("终端兼容：", Ansi.BOLD),
             "  NO_COLOR=1         关闭颜色输出",
-            "  CSC_ASCII_UI=1     强制使用 ASCII 边框（不支持 Unicode 时可用）",
-            "  CSC_TUI_MAX_WIDTH= 限制 TUI 最大宽度（用于超宽终端）",
+            "  CST_ASCII_UI=1     强制使用 ASCII 边框（不支持 Unicode 时可用）",
+            "  CST_TUI_MAX_WIDTH= 限制 TUI 最大宽度（用于超宽终端）",
+            "  CST_MACHINE_LABEL= 覆盖导出 Bundle 所使用的机器标识",
             "",
             style_text("TUI 结构：", Ansi.BOLD),
             "  首页先选择功能域，再回车进入该功能页。",
@@ -886,9 +1189,12 @@ class ToolkitTuiApp:
             "",
             style_text("浏览器说明：", Ansi.BOLD),
             "  /                  在会话列表 / Bundle 列表中过滤",
-            "  d                  打开详情 / 动作中心",
-            "  e / c / t          在会话列表直接导出为 Bundle / 克隆 / 模拟克隆",
-            "  s                  在 Bundle 列表切换来源过滤",
+            "  Enter              在浏览模式下进入单条操作面板，在选择模式下直接确认",
+            "  d                  只打开详情面板，不执行导入/导出",
+            "  e                  在会话列表直接导出为 Bundle",
+            "  s                  在 Bundle 列表切换导出方式",
+            "  m                  在 Bundle 列表按导出机器切换",
+            "  l                  在 Bundle 列表切换“全部历史 / 仅最新”",
             "  i / v              在 Bundle 列表直接导入为会话 / 导入为会话并自动建目录",
         ]
         for line in render_box(lines, width=box_width, border_codes=(Ansi.DIM,)):

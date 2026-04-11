@@ -1,7 +1,7 @@
 PYTHON ?= python3
 PIP ?= $(PYTHON) -m pip
-PACKAGE_MODULE := codex_session_cloner
-PACKAGE_COMMAND := codex-session-cloner
+PACKAGE_MODULE := codex_session_toolkit
+PACKAGE_COMMAND := codex-session-toolkit
 
 .PHONY: help run install bootstrap bootstrap-editable release test compile check version smoke
 
@@ -45,8 +45,8 @@ test:
 smoke:
 	sh ./install.sh --help >/dev/null
 	sh ./release.sh --help >/dev/null
-	sh ./codex-session-cloner --help >/dev/null
-	sh ./scripts/compat/csc-launcher.sh --help >/dev/null
+	sh ./codex-session-toolkit --help >/dev/null
+	sh ./scripts/compat/cst-launcher.sh --help >/dev/null
 	PYTHONPATH=src $(PYTHON) -m $(PACKAGE_MODULE) --help >/dev/null
 
 check: compile test smoke

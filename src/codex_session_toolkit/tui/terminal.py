@@ -59,6 +59,14 @@ ASCII_GLYPHS = {
     "ellipsis": "...",
 }
 
+
+def _env_first(*names: str) -> str:
+    for name in names:
+        value = os.environ.get(name)
+        if value:
+            return value
+    return ""
+
 LOGO_FONT_BANNER = {
     "C": [
         " ████",
@@ -109,6 +117,13 @@ LOGO_FONT_BANNER = {
         "  █  ",
         "█████",
     ],
+    "K": [
+        "█   █",
+        "█  █ ",
+        "███  ",
+        "█  █ ",
+        "█   █",
+    ],
     "N": [
         "█   █",
         "██  █",
@@ -122,6 +137,13 @@ LOGO_FONT_BANNER = {
         "█    ",
         "█    ",
         "█████",
+    ],
+    "T": [
+        "█████",
+        "  █  ",
+        "  █  ",
+        "  █  ",
+        "  █  ",
     ],
     "R": [
         "████ ",
@@ -289,7 +311,7 @@ def _take_suffix_by_width(text: str, max_width: int) -> str:
 
 
 def glyphs() -> dict:
-    if os.environ.get("CSC_ASCII_UI"):
+    if _env_first("CST_ASCII_UI", "CSC_ASCII_UI"):
         return ASCII_GLYPHS
     encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
     try:
@@ -347,7 +369,7 @@ def tui_width(cols: Optional[int] = None, *, fallback: int = 90) -> int:
     if cols >= 24:
         width = max(24, cols - 2)
 
-    cap = os.environ.get("CSC_TUI_MAX_WIDTH")
+    cap = _env_first("CST_TUI_MAX_WIDTH", "CSC_TUI_MAX_WIDTH")
     if cap:
         try:
             cap_n = int(cap)
@@ -546,7 +568,7 @@ def _render_wordmark(
 def app_logo_lines(max_width: Optional[int] = None) -> List[str]:
     max_width = term_width() if max_width is None else max(20, int(max_width))
 
-    ascii_ui = bool(os.environ.get("CSC_ASCII_UI"))
+    ascii_ui = bool(_env_first("CST_ASCII_UI", "CSC_ASCII_UI"))
     if not ascii_ui and not _can_encode("█"):
         ascii_ui = True
 
@@ -605,7 +627,7 @@ def app_logo_lines(max_width: Optional[int] = None) -> List[str]:
                 gradient=("#FF00FF", "#8800FF"),
             ),
             _render_wordmark(
-                "CLONER",
+                "TOOLKIT",
                 font=font,
                 fill=fill,
                 shadow=shadow,
@@ -620,31 +642,31 @@ def app_logo_lines(max_width: Optional[int] = None) -> List[str]:
         )
 
     def _try_triple_line(font: dict, *, char_gap: int, min_gap: int) -> Optional[List[str]]:
-        codex, session, cloner = _render_parts(font, char_gap=char_gap)
-        base_sum = _max_w(codex) + _max_w(session) + _max_w(cloner)
+        codex, session, toolkit = _render_parts(font, char_gap=char_gap)
+        base_sum = _max_w(codex) + _max_w(session) + _max_w(toolkit)
         max_gap = (max_width - base_sum) // 2
         if max_gap < min_gap:
             return None
         part_gap = min(max_gap, _ideal_part_gap(min_gap=min_gap))
-        line = _merge_horiz(_merge_horiz(codex, session, gap=part_gap), cloner, gap=part_gap)
+        line = _merge_horiz(_merge_horiz(codex, session, gap=part_gap), toolkit, gap=part_gap)
         if _max_w(line) <= max_width:
             return _normalize_logo_block(line)
         return None
 
     def _try_stacked(font: dict, *, char_gap: int, min_gap: int) -> Optional[List[str]]:
-        codex, session, cloner = _render_parts(font, char_gap=char_gap)
+        codex, session, toolkit = _render_parts(font, char_gap=char_gap)
 
-        bottom_base = _max_w(session) + _max_w(cloner)
+        bottom_base = _max_w(session) + _max_w(toolkit)
         bottom_max_gap = max_width - bottom_base
         if bottom_max_gap >= min_gap and _max_w(codex) <= max_width:
             bottom_gap = min(bottom_max_gap, _ideal_part_gap(min_gap=min_gap))
-            bottom = _merge_horiz(session, cloner, gap=bottom_gap)
+            bottom = _merge_horiz(session, toolkit, gap=bottom_gap)
             stacked = _normalize_logo_block(codex) + _normalize_logo_block(bottom)
             if _max_w(stacked) <= max_width:
                 return stacked
 
-        if _max_w(codex) <= max_width and _max_w(session) <= max_width and _max_w(cloner) <= max_width:
-            stacked = _normalize_logo_block(codex) + _normalize_logo_block(session) + _normalize_logo_block(cloner)
+        if _max_w(codex) <= max_width and _max_w(session) <= max_width and _max_w(toolkit) <= max_width:
+            stacked = _normalize_logo_block(codex) + _normalize_logo_block(session) + _normalize_logo_block(toolkit)
             if _max_w(stacked) <= max_width:
                 return stacked
 
@@ -668,7 +690,7 @@ def app_logo_lines(max_width: Optional[int] = None) -> List[str]:
             if candidate:
                 return candidate
 
-    full_text = "CODEX SESSION CLONER"
+    full_text = "CODEX SESSION TOOLKIT"
     for spec in ({"char_gap": 0, "word_gap": 1}, {"char_gap": 0, "word_gap": 0}):
         full = _render_wordmark(
             full_text,
@@ -686,7 +708,7 @@ def app_logo_lines(max_width: Optional[int] = None) -> List[str]:
             return _normalize_logo_block(full)
 
     acronym = _render_wordmark(
-        "CSC",
+        "CST",
         font=LOGO_FONT_3X7,
         fill=fill,
         shadow=shadow,
@@ -696,7 +718,7 @@ def app_logo_lines(max_width: Optional[int] = None) -> List[str]:
         shadow_ok=True,
         gradient=("#00FFFF", "#0000FF"),
     )
-    short = "codex-session-cloner"
+    short = "codex-session-toolkit"
     segments = short.split("-")
     if COLOR_ENABLED and len(segments) == 3:
         seg_colors = (Ansi.BRIGHT_CYAN, Ansi.BRIGHT_MAGENTA, Ansi.BRIGHT_BLUE)
@@ -715,7 +737,7 @@ def align_line(line: str, width: int, *, center: bool) -> str:
 
 
 def _box_chars() -> dict:
-    if os.environ.get("CSC_ASCII_UI"):
+    if _env_first("CST_ASCII_UI", "CSC_ASCII_UI"):
         return ASCII_BOX_CHARS
     encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
     try:

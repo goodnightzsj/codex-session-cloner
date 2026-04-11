@@ -64,7 +64,7 @@ if ($pyCmd.Length -gt 1) {
 }
 
 Write-Host "=============================================" -ForegroundColor Cyan
-Write-Host " Codex Session Cloner - Installer (Windows)" -ForegroundColor Cyan
+Write-Host " Codex Session Toolkit - Installer (Windows)" -ForegroundColor Cyan
 Write-Host "=============================================" -ForegroundColor Cyan
 Write-Host "Project:   $projectRoot"
 Write-Host "Python:    $pythonExe $($pythonPreArgs -join ' ')"
@@ -110,6 +110,6 @@ try {
 Write-Host ""
 Write-Host "Install complete." -ForegroundColor Green
 Write-Host "Run now:"
-Write-Host "  .\codex-session-cloner.cmd"
+Write-Host "  .\codex-session-toolkit.cmd"
 Write-Host "Version:"
-Write-Host "  .\.venv\Scripts\codex-session-cloner.exe --version"
+Write-Host "  .\.venv\Scripts\codex-session-toolkit.exe --version"

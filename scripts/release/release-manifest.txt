@@ -3,10 +3,10 @@ src
 scripts/install
 pyproject.toml
 readme.md
-codex-session-cloner
-codex-session-cloner.command
-codex-session-cloner.cmd
-codex-session-cloner.ps1
+codex-session-toolkit
+codex-session-toolkit.command
+codex-session-toolkit.cmd
+codex-session-toolkit.ps1
 install.sh
 install.command
 install.ps1

@@ -2,20 +2,44 @@
 set -eu
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-PACKAGE_NAME="codex_session_cloner"
+PACKAGE_NAME="codex_session_toolkit"
 VENV_DIR="${VENV_DIR:-$SCRIPT_DIR/.venv}"
-VENV_COMMAND="$VENV_DIR/bin/codex-session-cloner"
+VENV_COMMAND="$VENV_DIR/bin/codex-session-toolkit"
 SRC_DIR="$SCRIPT_DIR/src"
+PACKAGE_DIR="$SRC_DIR/$PACKAGE_NAME"
+LAUNCH_MODE="${CST_LAUNCH_MODE:-${CSC_LAUNCH_MODE:-auto}}"
+IS_GIT_WORKTREE=0
 
-if [ -x "$VENV_COMMAND" ]; then
+if [ -d "$SCRIPT_DIR/.git" ] && [ -d "$PACKAGE_DIR" ]; then
+  IS_GIT_WORKTREE=1
+fi
+
+run_venv() {
   echo "============================================="
-  echo " Codex Session Cloner - Launcher (Local Venv)"
+  echo " Codex Session Toolkit - Launcher (Local Venv)"
   echo "============================================="
   echo ">> $VENV_COMMAND $*"
   exec "$VENV_COMMAND" "$@"
+}
+
+if [ ! -d "$PACKAGE_DIR" ] && [ "$LAUNCH_MODE" = "source" ]; then
+  echo "Error: cannot find package source at $SRC_DIR/$PACKAGE_NAME" >&2
+  echo "Tip: run ./install.sh first, or keep the src/ tree intact." >&2
+  exit 1
 fi
 
-if [ ! -d "$SRC_DIR/$PACKAGE_NAME" ]; then
+if [ "$LAUNCH_MODE" = "installed" ] && [ -x "$VENV_COMMAND" ]; then
+  run_venv "$@"
+fi
+
+if [ "$LAUNCH_MODE" = "auto" ] && [ "$IS_GIT_WORKTREE" -eq 0 ] && [ -x "$VENV_COMMAND" ]; then
+  run_venv "$@"
+fi
+
+if [ ! -d "$PACKAGE_DIR" ]; then
+  if [ -x "$VENV_COMMAND" ]; then
+    run_venv "$@"
+  fi
   echo "Error: cannot find package source at $SRC_DIR/$PACKAGE_NAME" >&2
   echo "Tip: run ./install.sh first, or keep the src/ tree intact." >&2
   exit 1
@@ -37,7 +61,7 @@ if [ -z "$PYTHON_BIN" ]; then
 fi
 
 echo "============================================="
-echo " Codex Session Cloner - Launcher (Source Mode)"
+echo " Codex Session Toolkit - Launcher (Source Mode)"
 echo "============================================="
 echo ">> $PYTHON_BIN -m $PACKAGE_NAME $*"
 

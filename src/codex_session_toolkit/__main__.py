@@ -1,4 +1,4 @@
-"""Module execution entrypoint for `python -m codex_session_cloner`."""
+"""Module execution entrypoint for `python -m codex_session_toolkit`."""
 
 from .cli import main
 
