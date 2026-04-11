@@ -161,7 +161,7 @@ def collect_session_summaries(
 
     for session_file in sorted(iter_session_files(paths, active_only=active_only), reverse=True):
         session_id = session_id_from_filename(session_file) or session_file.stem
-        session_scope = "archived" if str(session_file).startswith(str(paths.archived_sessions_dir)) else "active"
+        session_scope = "archived" if "archived_sessions" in session_file.parts else "active"
         preview = history_preview.get(session_id, "")
         fields = extract_session_meta_fields(session_file, "source", "originator", "cwd", "model_provider")
         source_name = fields["source"]
@@ -238,7 +238,8 @@ def collect_session_ids_for_kind(
                         session_ids.append(session_id)
                         seen_session_ids.add(session_id)
                     break
-        except Exception:
+        except Exception as exc:
+            print(f"Warning: failed to read session file {path}: {exc}", file=sys.stderr)
             continue
 
     return session_ids

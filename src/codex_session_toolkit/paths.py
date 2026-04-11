@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 import functools
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
 
 @dataclass(frozen=True)
 class CodexPaths:
-    home: Path = Path.home()
-    cwd: Path = Path.cwd()
+    home: Path = field(default_factory=Path.home)
+    cwd: Path = field(default_factory=Path.cwd)
 
     @property
     def code_dir(self) -> Path:

@@ -13,6 +13,15 @@ from ..errors import ToolkitError
 from ..support import iso_to_epoch
 
 
+def _is_subpath(child: Path, parent: Path) -> bool:
+    """Check if child is under parent, compatible with Python 3.8."""
+    try:
+        child.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
 def ensure_desktop_workspace_root(workspace_dir: str, state_file: Path) -> bool:
     if not state_file.exists():
         print(f"Warning: Codex Desktop state file not found: {state_file}", file=sys.stderr)
@@ -25,8 +34,9 @@ def ensure_desktop_workspace_root(workspace_dir: str, state_file: Path) -> bool:
     project_order = list(data.setdefault("project-order", []))
 
     covered = False
+    workspace_path = Path(workspace_dir)
     for root in saved:
-        if workspace_dir == root or workspace_dir.startswith(root.rstrip("/") + "/"):
+        if workspace_path == Path(root) or _is_subpath(workspace_path, Path(root)):
             covered = True
             break
 

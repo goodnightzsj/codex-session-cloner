@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shlex
 import shutil
 import sys
@@ -18,7 +19,7 @@ from ..stores.history import collect_history_lines_for_session, first_history_te
 from ..stores.session_files import (
     collect_session_ids_for_kind,
     extract_last_timestamp,
-    extract_session_field_from_file,
+    extract_session_meta_fields,
     find_session_file,
 )
 from ..support import (
@@ -81,9 +82,10 @@ def export_session(
         validate_jsonl_file(bundle_history, "Bundled history file", "history", session_id)
 
         first_prompt = first_history_text(history_lines)
-        session_cwd = extract_session_field_from_file("cwd", session_file)
-        session_source = extract_session_field_from_file("source", session_file)
-        session_originator = extract_session_field_from_file("originator", session_file)
+        meta_fields = extract_session_meta_fields(session_file, "cwd", "source", "originator")
+        session_cwd = meta_fields["cwd"]
+        session_source = meta_fields["source"]
+        session_originator = meta_fields["originator"]
         session_kind = classify_session_kind(session_source, session_originator)
         last_updated = extract_last_timestamp(session_file) or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -194,13 +196,22 @@ def export_sessions_for_kind(
             failed_exports.append((session_id, str(exc)))
 
     manifest_file = export_root / f"_{manifest_stem}_export_manifest.txt"
-    with manifest_file.open("w", encoding="utf-8") as fh:
-        fh.write(f"# exported_at={datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}\n")
-        fh.write(f"# session_kind={session_kind}\n")
-        fh.write(f"# active_only={1 if active_only else 0}\n")
-        fh.write(f"# count={len(success_ids)}\n")
-        for session_id in success_ids:
-            fh.write(session_id + "\n")
+    tmp_fd, tmp_path = tempfile.mkstemp(dir=str(export_root), suffix=".tmp")
+    try:
+        with os.fdopen(tmp_fd, "w", encoding="utf-8") as fh:
+            fh.write(f"# exported_at={datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}\n")
+            fh.write(f"# session_kind={session_kind}\n")
+            fh.write(f"# active_only={1 if active_only else 0}\n")
+            fh.write(f"# count={len(success_ids)}\n")
+            for session_id in success_ids:
+                fh.write(session_id + "\n")
+        os.replace(tmp_path, str(manifest_file))
+    except BaseException:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
     return BatchExportResult(
         summary_label=summary_label,

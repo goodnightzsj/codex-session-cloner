@@ -8,6 +8,7 @@ import sqlite3
 import tempfile
 from collections import OrderedDict
 from datetime import datetime, timezone
+from pathlib import Path
 
 from ..errors import ToolkitError
 from ..models import RepairResult
@@ -30,7 +31,7 @@ def repair_desktop(
         raise ToolkitError(f"Missing Codex data directory: {paths.code_dir}")
 
     provider = detect_provider(paths, explicit=target_provider)
-    backup_root = paths.code_dir / "repair_backups" / f"visibility-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    backup_root = paths.code_dir / "repair_backups" / f"visibility-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
     backed_up: set[str] = set()
     warnings: list[str] = []
 
@@ -196,9 +197,10 @@ def repair_desktop(
                 pass
             raise
 
-    if paths.state_file.exists():
-        state_data = json.loads(paths.state_file.read_text(encoding="utf-8"))
-    else:
+    try:
+        state_data = json.loads(paths.state_file.read_text(encoding="utf-8")) if paths.state_file.exists() else {}
+    except (OSError, json.JSONDecodeError) as exc:
+        warnings.append(f"Warning: failed to read state file {paths.state_file}: {exc}")
         state_data = {}
 
     saved_roots = list(state_data.get("electron-saved-workspace-roots", []))
@@ -206,11 +208,15 @@ def repair_desktop(
 
     for root in workspace_candidates:
         covered = False
+        root_path = Path(root)
         for existing in saved_roots:
-            existing_str = str(existing)
-            if root == existing_str or root.startswith(existing_str.rstrip("/") + "/"):
+            existing_path = Path(existing)
+            try:
+                root_path.relative_to(existing_path)
                 covered = True
                 break
+            except ValueError:
+                pass
         if not covered:
             saved_roots.append(root)
             if root not in project_order:

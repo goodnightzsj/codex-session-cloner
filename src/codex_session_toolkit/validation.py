@@ -117,7 +117,7 @@ def validate_relative_path(relative_path: str, session_id: str) -> str:
     """Validate and return the normalized relative path."""
     normalized = normalize_relative_path(relative_path)
 
-    if not normalized or normalized.startswith("/") or "\n" in normalized:
+    if not normalized or normalized.startswith("/") or "\n" in normalized or re.match(r"^[A-Za-z]:", normalized):
         raise ToolkitError(f"Unsafe relative path in manifest: {relative_path}")
 
     if not (normalized.startswith("sessions/") or normalized.startswith("archived_sessions/")):

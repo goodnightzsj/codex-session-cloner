@@ -23,7 +23,7 @@ from ..stores.bundles import (
 )
 from ..stores.desktop_state import ensure_desktop_workspace_root, prepare_session_for_import, upsert_threads_table
 from ..stores.index import batch_upsert_session_index, load_existing_index, upsert_session_index
-from ..stores.session_files import extract_last_timestamp, extract_session_field_from_file
+from ..stores.session_files import extract_last_timestamp, extract_session_meta_fields
 from ..support import (
     classify_session_kind,
     iso_to_epoch,
@@ -104,9 +104,10 @@ def import_session(
     if bundle_history.exists():
         validate_jsonl_file(bundle_history, "Bundled history file", "history", session_id)
 
-    session_cwd = manifest.get("SESSION_CWD", "") or extract_session_field_from_file("cwd", source_session)
-    session_source = manifest.get("SESSION_SOURCE", "") or extract_session_field_from_file("source", source_session)
-    session_originator = manifest.get("SESSION_ORIGINATOR", "") or extract_session_field_from_file("originator", source_session)
+    source_fields = extract_session_meta_fields(source_session, "cwd", "source", "originator")
+    session_cwd = manifest.get("SESSION_CWD", "") or source_fields["cwd"]
+    session_source = manifest.get("SESSION_SOURCE", "") or source_fields["source"]
+    session_originator = manifest.get("SESSION_ORIGINATOR", "") or source_fields["originator"]
     session_kind = manifest.get("SESSION_KIND", "") or classify_session_kind(session_source, session_originator)
     updated_at = normalize_updated_at(manifest.get("UPDATED_AT", ""), source_session, extract_last_timestamp(source_session))
     thread_name = manifest.get("THREAD_NAME", "")
@@ -172,9 +173,10 @@ def import_session(
             rollout_action = "created"
 
         effective_session_file = target_session
-        session_cwd = extract_session_field_from_file("cwd", effective_session_file) or session_cwd
-        session_source = extract_session_field_from_file("source", effective_session_file) or session_source
-        session_originator = extract_session_field_from_file("originator", effective_session_file) or session_originator
+        effective_fields = extract_session_meta_fields(effective_session_file, "cwd", "source", "originator")
+        session_cwd = effective_fields["cwd"] or session_cwd
+        session_source = effective_fields["source"] or session_source
+        session_originator = effective_fields["originator"] or session_originator
         session_kind = classify_session_kind(session_source, session_originator)
         effective_updated_at = normalize_updated_at(
             effective_updated_at,
