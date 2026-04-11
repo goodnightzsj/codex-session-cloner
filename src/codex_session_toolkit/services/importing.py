@@ -92,8 +92,7 @@ def import_session(
 
     manifest = load_manifest(manifest_file)
     session_id = validate_session_id(manifest["SESSION_ID"])
-    relative_path = manifest["RELATIVE_PATH"]
-    validate_relative_path(relative_path, session_id)
+    relative_path = validate_relative_path(manifest["RELATIVE_PATH"], session_id)
 
     if not input_path.is_dir() and input_value != session_id:
         raise ToolkitError(f"Manifest session id does not match requested session id: {session_id}")

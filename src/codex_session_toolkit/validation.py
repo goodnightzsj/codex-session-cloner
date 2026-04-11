@@ -108,19 +108,29 @@ def validate_jsonl_file(
         raise ToolkitError(f"{file_label} does not contain a session_meta record.")
 
 
-def validate_relative_path(relative_path: str, session_id: str) -> None:
-    if not relative_path or relative_path.startswith("/") or "\n" in relative_path:
+def normalize_relative_path(relative_path: str) -> str:
+    """Normalize Windows backslashes to forward slashes in manifest paths."""
+    return relative_path.replace("\\", "/")
+
+
+def validate_relative_path(relative_path: str, session_id: str) -> str:
+    """Validate and return the normalized relative path."""
+    normalized = normalize_relative_path(relative_path)
+
+    if not normalized or normalized.startswith("/") or "\n" in normalized:
         raise ToolkitError(f"Unsafe relative path in manifest: {relative_path}")
 
-    if not (relative_path.startswith("sessions/") or relative_path.startswith("archived_sessions/")):
+    if not (normalized.startswith("sessions/") or normalized.startswith("archived_sessions/")):
         raise ToolkitError(f"Unexpected relative path in manifest: {relative_path}")
 
-    path = Path(relative_path)
+    path = Path(normalized)
     if any(part in {"..", "."} for part in path.parts):
         raise ToolkitError(f"Path traversal detected in manifest: {relative_path}")
 
     if not path.name.endswith(f"-{session_id}.jsonl"):
         raise ToolkitError(f"Manifest path does not match session id: {relative_path}")
+
+    return normalized
 
 
 def normalize_updated_at(raw_value: str, session_file: Path, fallback_timestamp: str = "") -> str:
@@ -135,6 +145,7 @@ def normalize_updated_at(raw_value: str, session_file: Path, fallback_timestamp:
 __all__ = [
     "ensure_path_within_dir",
     "load_manifest",
+    "normalize_relative_path",
     "normalize_updated_at",
     "validate_jsonl_file",
     "validate_relative_path",
