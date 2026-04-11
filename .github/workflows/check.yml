@@ -37,11 +37,11 @@ jobs:
           - os: ubuntu-latest
             python-version: "3.11"
             install-command: sh ./install.sh --force
-            run-command: sh ./codex-session-cloner --version
+            run-command: sh ./codex-session-toolkit --version
           - os: windows-latest
             python-version: "3.11"
             install-command: powershell -ExecutionPolicy Bypass -File .\install.ps1 -Force
-            run-command: .\codex-session-cloner.cmd --version
+            run-command: .\codex-session-toolkit.cmd --version
 
     steps:
       - name: Checkout
