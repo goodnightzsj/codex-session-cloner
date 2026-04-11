@@ -16,3 +16,4 @@ coverage.xml
 build/
 dist/
 *.egg-info/
+llmdoc/
