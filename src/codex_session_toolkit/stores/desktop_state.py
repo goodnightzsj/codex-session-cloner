@@ -80,7 +80,7 @@ def prepare_session_for_import(
 
             try:
                 obj = json.loads(line)
-            except Exception:
+            except json.JSONDecodeError:
                 out_fh.write(raw)
                 continue
 
@@ -144,7 +144,7 @@ def upsert_threads_table(
             if first_line:
                 try:
                     first_user_message = json.loads(first_line).get("text") or first_user_message
-                except Exception:
+                except json.JSONDecodeError:
                     pass
 
     source_name = session_source or meta.get("source", "")

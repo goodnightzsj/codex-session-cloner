@@ -116,7 +116,7 @@ def import_session(
     desktop_env = paths.state_file.exists() or state_db is not None
     try:
         target_desktop_model_provider = detect_provider(paths) if desktop_env else ""
-    except Exception:
+    except (OSError, ToolkitError):
         target_desktop_model_provider = ""
     auto_desktop_compat = session_kind == "cli" and desktop_env
 

@@ -19,7 +19,7 @@ def first_history_messages(history_file: Path) -> Dict[str, str]:
                 continue
             try:
                 obj = json.loads(stripped)
-            except Exception:
+            except json.JSONDecodeError:
                 continue
             if not isinstance(obj, dict):
                 continue
@@ -43,7 +43,7 @@ def collect_history_lines_for_session(history_file: Path, session_id: str) -> Li
                 continue
             try:
                 obj = json.loads(stripped)
-            except Exception:
+            except json.JSONDecodeError:
                 continue
             if obj.get("session_id") == session_id:
                 lines.append(raw if raw.endswith("\n") else raw + "\n")

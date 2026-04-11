@@ -217,7 +217,7 @@ def bundle_directory_sort_key(bundle_dir: Path, *, manifest: Optional[dict] = No
         try:
             m = load_manifest(manifest_file)
             exported_epoch = iso_to_epoch(m.get("EXPORTED_AT", "") or m.get("UPDATED_AT", ""))
-        except Exception:
+        except (OSError, ToolkitError):
             pass
     try:
         modified_ns = bundle_dir.stat().st_mtime_ns
@@ -239,7 +239,7 @@ def resolve_bundle_dir(bundle_root: Path, session_id: str) -> Path:
         seen.add(direct_candidate)
         try:
             manifest_cache[direct_candidate] = load_manifest(direct_candidate / "manifest.env")
-        except Exception:
+        except (OSError, ToolkitError):
             pass
 
     for bundle_dir in iter_bundle_directories_under_root(bundle_root):
@@ -252,7 +252,7 @@ def resolve_bundle_dir(bundle_root: Path, session_id: str) -> Path:
         manifest_file = bundle_dir / "manifest.env"
         try:
             manifest = load_manifest(manifest_file)
-        except Exception:
+        except (OSError, ToolkitError):
             continue
         if manifest.get("SESSION_ID", "") == session_id:
             candidates.append(bundle_dir)
@@ -425,12 +425,12 @@ def validate_bundle_directory(
             is_valid=True,
             message="OK",
         )
-    except Exception as exc:
+    except (OSError, ToolkitError) as exc:
         fallback_session_id = bundle_dir.name
         try:
             if manifest_file.is_file():
                 fallback_session_id = load_manifest(manifest_file).get("SESSION_ID", bundle_dir.name) or bundle_dir.name
-        except Exception:
+        except (OSError, ToolkitError):
             pass
         return BundleValidationResult(
             source_group=source_group,

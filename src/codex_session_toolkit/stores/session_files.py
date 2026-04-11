@@ -92,29 +92,32 @@ def first_text_fragment(value: object) -> str:
 
 
 def first_user_prompt_from_session(session_file: Path) -> str:
-    with session_file.open("r", encoding="utf-8") as fh:
-        for raw in fh:
-            stripped = raw.strip()
-            if not stripped:
-                continue
-            try:
-                obj = json.loads(stripped)
-            except Exception:
-                continue
-            if not isinstance(obj, dict):
-                continue
+    try:
+        with session_file.open("r", encoding="utf-8") as fh:
+            for raw in fh:
+                stripped = raw.strip()
+                if not stripped:
+                    continue
+                try:
+                    obj = json.loads(stripped)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(obj, dict):
+                    continue
 
-            payload = obj.get("payload")
-            candidate = ""
-            if obj.get("type") == "response_item" and isinstance(payload, dict) and payload.get("role") == "user":
-                candidate = first_text_fragment(payload.get("content"))
-            elif obj.get("type") == "message" and isinstance(payload, dict) and payload.get("role") == "user":
-                candidate = first_text_fragment(payload.get("text"))
-            elif obj.get("type") == "event_msg" and isinstance(payload, dict) and payload.get("type") == "user_message":
-                candidate = first_text_fragment(payload.get("message") or payload.get("text"))
+                payload = obj.get("payload")
+                candidate = ""
+                if obj.get("type") == "response_item" and isinstance(payload, dict) and payload.get("role") == "user":
+                    candidate = first_text_fragment(payload.get("content"))
+                elif obj.get("type") == "message" and isinstance(payload, dict) and payload.get("role") == "user":
+                    candidate = first_text_fragment(payload.get("text"))
+                elif obj.get("type") == "event_msg" and isinstance(payload, dict) and payload.get("type") == "user_message":
+                    candidate = first_text_fragment(payload.get("message") or payload.get("text"))
 
-            if candidate and not looks_like_session_meta_text(candidate):
-                return candidate
+                if candidate and not looks_like_session_meta_text(candidate):
+                    return candidate
+    except FileNotFoundError:
+        pass
     return ""
 
 
@@ -160,7 +163,7 @@ def parse_jsonl_records(path: Path) -> List[Tuple[str, Optional[dict]]]:
                     continue
                 try:
                     obj = json.loads(stripped)
-                except Exception as exc:
+                except json.JSONDecodeError as exc:
                     raise ToolkitError(f"{path} line {line_number}: {exc}") from exc
                 if not isinstance(obj, dict):
                     raise ToolkitError(f"{path} line {line_number}: JSON value is not an object")
@@ -179,7 +182,7 @@ def read_session_payload(path: Path) -> dict:
                     continue
                 try:
                     obj = json.loads(stripped)
-                except Exception as exc:
+                except json.JSONDecodeError as exc:
                     raise ToolkitError(f"{path} line {line_number}: {exc}") from exc
                 if obj.get("type") != "session_meta":
                     continue
@@ -208,7 +211,7 @@ def extract_session_meta_fields(session_file: Path, *field_names: str) -> dict:
                     continue
                 try:
                     obj = json.loads(stripped)
-                except Exception:
+                except json.JSONDecodeError:
                     continue
                 if obj.get("type") != "session_meta":
                     continue
@@ -234,7 +237,7 @@ def extract_last_timestamp(session_file: Path) -> str:
                     continue
                 try:
                     obj = json.loads(stripped)
-                except Exception:
+                except json.JSONDecodeError:
                     continue
                 timestamp = obj.get("timestamp")
                 if isinstance(timestamp, str) and timestamp:
@@ -342,7 +345,7 @@ def collect_session_ids_for_kind(
                         session_ids.append(session_id)
                         seen_session_ids.add(session_id)
                     break
-        except Exception as exc:
+        except (OSError, json.JSONDecodeError) as exc:
             print(f"Warning: failed to read session file {path}: {exc}", file=sys.stderr)
             continue
 

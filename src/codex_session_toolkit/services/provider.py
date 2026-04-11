@@ -28,7 +28,7 @@ def detect_provider(paths: CodexPaths, explicit: str = "") -> str:
             provider = data.get("model_provider")
             if isinstance(provider, str) and provider:
                 return provider
-        except Exception:
+        except (OSError, ValueError):
             pass
 
     text = config_file.read_text(encoding="utf-8")

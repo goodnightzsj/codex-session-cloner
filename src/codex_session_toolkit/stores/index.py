@@ -23,7 +23,7 @@ def salvage_index_line(raw: str) -> Optional[dict]:
     raw_thread_name = thread_match.group(1) if thread_match else session_match.group(1)
     try:
         thread_name = json.loads(f'"{raw_thread_name}"')
-    except Exception:
+    except json.JSONDecodeError:
         thread_name = raw_thread_name.replace('\\"', '"')
 
     updated_match = re.search(
@@ -49,7 +49,7 @@ def load_existing_index(index_file: Path) -> Dict[str, dict]:
                 continue
             try:
                 obj = json.loads(raw)
-            except Exception:
+            except json.JSONDecodeError:
                 obj = salvage_index_line(raw)
             if not isinstance(obj, dict):
                 continue
@@ -74,7 +74,7 @@ def upsert_session_index(index_file: Path, session_id: str, thread_name: str, up
                     continue
                 try:
                     obj = json.loads(raw)
-                except Exception:
+                except json.JSONDecodeError:
                     obj = salvage_index_line(raw)
                     if obj is None:
                         discarded_invalid_lines += 1
@@ -140,7 +140,7 @@ def batch_upsert_session_index(index_file: Path, updates: list[tuple[str, str, s
                     continue
                 try:
                     obj = json.loads(raw)
-                except Exception:
+                except json.JSONDecodeError:
                     obj = salvage_index_line(raw)
                     if obj is None:
                         discarded_invalid_lines += 1

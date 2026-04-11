@@ -82,7 +82,7 @@ def validate_jsonl_file(
 
             try:
                 obj = json.loads(stripped)
-            except Exception as exc:
+            except json.JSONDecodeError as exc:
                 raise ToolkitError(f"{file_label} has invalid JSON at line {line_number}: {exc}") from exc
 
             if not isinstance(obj, dict):

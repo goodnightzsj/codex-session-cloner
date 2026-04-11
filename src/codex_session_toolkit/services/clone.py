@@ -237,7 +237,7 @@ def cleanup_clones(
             try:
                 target_path.unlink()
                 deleted.append(target_path)
-            except Exception as exc:
+            except OSError as exc:
                 errors.append((target_path, str(exc)))
 
     return CleanupResult(
