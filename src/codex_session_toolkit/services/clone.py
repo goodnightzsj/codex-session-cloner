@@ -52,7 +52,7 @@ def build_clone_index(
 
         origin_id = payload.get("cloned_from")
         if isinstance(origin_id, str) and origin_id:
-            if is_codex_rollout_compatible(paths, session_file, origin_id):
+            if is_codex_rollout_compatible(paths, session_file, None):
                 cloned_from_ids.add(origin_id)
 
     if not quiet:

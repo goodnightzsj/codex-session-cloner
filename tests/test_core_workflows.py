@@ -474,6 +474,41 @@ class CoreWorkflowTests(unittest.TestCase):
             self.assertEqual(cloned_payload["cloned_from"], original_id)
             self.assertEqual(cloned_payload["original_provider"], "old-provider")
 
+    def test_clone_to_provider_is_idempotent_after_first_clone(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir) / "workspace"
+            home = Path(tmpdir) / "home"
+            workspace.mkdir()
+            write_config(home, "target-provider")
+            original_cwd = workspace / "project-b"
+            original_cwd.mkdir()
+            original_id = "12111111-1111-1111-1111-111111111111"
+            write_session(
+                home,
+                original_id,
+                provider="old-provider",
+                source="cli",
+                originator="codex_cli_rs",
+                cwd=original_cwd,
+            )
+            paths = CodexPaths(home=home, cwd=workspace)
+
+            with pushd(workspace):
+                first_result = clone_to_provider(paths)
+                second_result = clone_to_provider(paths)
+
+            self.assertEqual(first_result.stats["cloned"], 1)
+            self.assertEqual(second_result.stats["cloned"], 0)
+            self.assertEqual(second_result.stats["skipped_exists"], 1)
+
+            sessions = list(iter_session_files(paths, active_only=True))
+            self.assertEqual(len(sessions), 2)
+
+            cloned_files = [
+                path for path in sessions if read_session_payload(path).get("cloned_from") == original_id
+            ]
+            self.assertEqual(len(cloned_files), 1)
+
     def test_export_validate_and_import_roundtrip_updates_desktop_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             workspace = Path(tmpdir) / "workspace"
