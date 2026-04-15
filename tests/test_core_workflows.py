@@ -1,6 +1,7 @@
 import json
 import os
 import shlex
+import shutil
 import sqlite3
 import sys
 import tempfile
@@ -18,9 +19,11 @@ from codex_session_toolkit.paths import CodexPaths  # noqa: E402
 from codex_session_toolkit.models import BundleSummary  # noqa: E402
 from codex_session_toolkit.services.browse import get_bundle_summaries, get_session_summaries, validate_bundles  # noqa: E402
 from codex_session_toolkit.services.clone import clone_to_provider  # noqa: E402
+from codex_session_toolkit.services.dedupe import dedupe_clones  # noqa: E402
 from codex_session_toolkit.services.exporting import export_active_desktop_all, export_session  # noqa: E402
 from codex_session_toolkit.services.importing import import_desktop_all, import_session  # noqa: E402
 from codex_session_toolkit.services.repair import repair_desktop  # noqa: E402
+from codex_session_toolkit.stores.index import load_existing_index  # noqa: E402
 from codex_session_toolkit.support import machine_label_to_key  # noqa: E402
 from codex_session_toolkit.stores.bundles import collect_known_bundle_summaries, latest_distinct_bundle_summaries  # noqa: E402
 from codex_session_toolkit.stores.session_files import iter_session_files, read_session_payload  # noqa: E402
@@ -473,6 +476,59 @@ class CoreWorkflowTests(unittest.TestCase):
             self.assertEqual(cloned_payload["model_provider"], "target-provider")
             self.assertEqual(cloned_payload["cloned_from"], original_id)
             self.assertEqual(cloned_payload["original_provider"], "old-provider")
+
+    def test_dedupe_clones_removes_duplicate_clone_and_cleans_index_and_threads(self) -> None:
+        tmpdir = tempfile.mkdtemp()
+        try:
+            workspace = Path(tmpdir) / "workspace"
+            home = Path(tmpdir) / "home"
+            workspace.mkdir()
+            write_config(home, "target-provider")
+            write_state_file(home)
+            create_threads_db(home)
+
+            project_cwd = workspace / "project-d"
+            project_cwd.mkdir()
+            original_id = "41414141-4141-4141-4141-414141414141"
+            write_session(
+                home,
+                original_id,
+                provider="old-provider",
+                source="vscode",
+                originator="Codex Desktop",
+                cwd=project_cwd,
+                archived=False,
+                user_message="修复重复 clone",
+            )
+
+            paths = CodexPaths(home=home, cwd=workspace)
+            clone_to_provider(paths, target_provider="target-provider", dry_run=False)
+            repair_desktop(paths, target_provider="target-provider")
+
+            sessions = list(iter_session_files(paths, active_only=False))
+            clone_sessions = [path for path in sessions if read_session_payload(path).get("cloned_from") == original_id]
+            self.assertEqual(len(clone_sessions), 1)
+            clone_path = clone_sessions[0]
+            clone_id = read_session_payload(clone_path)["id"]
+
+            dry_run_result = dedupe_clones(paths, target_provider="target-provider", dry_run=True)
+            self.assertEqual(len(dry_run_result.duplicate_pairs), 1)
+
+            result = dedupe_clones(paths, target_provider="target-provider", dry_run=False)
+            self.assertEqual(len(result.deleted_session_ids), 1)
+            self.assertEqual(result.deleted_session_ids[0], clone_id)
+            self.assertFalse(clone_path.exists())
+
+            index_entries = load_existing_index(home / ".codex" / "session_index.jsonl")
+            self.assertIn(original_id, index_entries)
+            self.assertNotIn(clone_id, index_entries)
+
+            conn = sqlite3.connect(home / ".codex" / "state_0001.sqlite")
+            count = conn.execute("select count(*) from threads where id = ?", (clone_id,)).fetchone()[0]
+            conn.close()
+            self.assertEqual(count, 0)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
     def test_export_validate_and_import_roundtrip_updates_desktop_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

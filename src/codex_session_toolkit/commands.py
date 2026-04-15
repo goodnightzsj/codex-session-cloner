@@ -15,6 +15,7 @@ from .presenters.reports import (
     print_bundle_rows,
     print_cleanup_result,
     print_clone_run_result,
+    print_dedupe_result,
     print_export_result,
     print_import_result,
     print_repair_result,
@@ -23,6 +24,7 @@ from .presenters.reports import (
 )
 from .services.browse import get_bundle_summaries, get_session_summaries, validate_bundles
 from .services.clone import cleanup_clones, clone_to_provider
+from .services.dedupe import dedupe_clones
 from .services.exporting import export_active_desktop_all, export_cli_all, export_desktop_all, export_session
 from .services.importing import import_desktop_all, import_session
 from .services.repair import repair_desktop
@@ -73,6 +75,10 @@ def create_parser() -> argparse.ArgumentParser:
     clean_parser = subparsers.add_parser("clean-clones", help="Delete legacy unmarked clone files")
     clean_parser.add_argument("target_provider", nargs="?", default="", help="Optional provider override")
     clean_parser.add_argument("--dry-run", action="store_true")
+
+    dedupe_parser = subparsers.add_parser("dedupe-clones", help="Remove duplicate cloned sessions when the original still exists")
+    dedupe_parser.add_argument("target_provider", nargs="?", default="", help="Optional provider override")
+    dedupe_parser.add_argument("--dry-run", action="store_true")
 
     export_parser = subparsers.add_parser("export", help="Export one session bundle")
     export_parser.add_argument("session_id")
@@ -146,6 +152,8 @@ def run_cli(argv: Sequence[str], *, paths: Optional[CodexPaths] = None) -> int:
         return print_clone_run_result(clone_to_provider(paths, target_provider=args.target_provider, dry_run=args.dry_run))
     if args.command == "clean-clones":
         return print_cleanup_result(cleanup_clones(paths, target_provider=args.target_provider, dry_run=args.dry_run))
+    if args.command == "dedupe-clones":
+        return print_dedupe_result(dedupe_clones(paths, target_provider=args.target_provider, dry_run=args.dry_run))
     if args.command == "export":
         return print_export_result(
             export_session(

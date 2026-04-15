@@ -11,6 +11,7 @@ from ..models import (
     CleanupResult,
     CloneFileResult,
     CloneRunResult,
+    DedupeResult,
     ExportResult,
     ImportResult,
     RepairResult,
@@ -109,6 +110,32 @@ def print_cleanup_result(result: CleanupResult) -> int:
             print(f"[Error] Deleting {target_path}: {reason}", file=sys.stderr)
 
     print("\nCleanup scan complete.")
+    return 1 if result.errors else 0
+
+
+def print_dedupe_result(result: DedupeResult) -> int:
+    print(f"Target Provider: {result.provider}")
+    print(f"Dry run: {'yes' if result.dry_run else 'no'}")
+    print(f"Files scanned: {result.files_checked}")
+    print(f"Duplicate pairs found: {len(result.duplicate_pairs)}")
+
+    for delete_path, keep_path, reason in result.duplicate_pairs[:30]:
+        action_prefix = "[DRY-RUN] Would delete" if result.dry_run else "[Deleted]"
+        print(f"{action_prefix} {delete_path}")
+        print(f"  keep: {keep_path}")
+        print(f"  reason: {reason}")
+
+    if len(result.duplicate_pairs) > 30:
+        print(f"... and {len(result.duplicate_pairs) - 30} more")
+
+    if result.backup_root is not None:
+        print(f"Backup directory: {result.backup_root}")
+    if result.deleted_session_ids:
+        print(f"Deleted session ids: {len(result.deleted_session_ids)}")
+    if result.errors:
+        print("Errors:", file=sys.stderr)
+        for path, reason in result.errors:
+            print(f"{path}: {reason}", file=sys.stderr)
     return 1 if result.errors else 0
 
 

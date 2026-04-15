@@ -189,3 +189,57 @@ def batch_upsert_session_index(index_file: Path, updates: list[tuple[str, str, s
             f"Warning: discarded {discarded_invalid_lines} unrecoverable malformed session_index.jsonl line(s).",
             file=sys.stderr,
         )
+
+
+def remove_session_index_entries(index_file: Path, session_ids: set[str]) -> None:
+    if not session_ids or not index_file.exists():
+        return
+
+    entries = OrderedDict()
+    discarded_invalid_lines = 0
+
+    with index_file.open("r", encoding="utf-8") as fh:
+        for raw in fh:
+            raw = raw.rstrip("\n")
+            if not raw:
+                continue
+            try:
+                obj = json.loads(raw)
+            except json.JSONDecodeError:
+                obj = salvage_index_line(raw)
+                if obj is None:
+                    discarded_invalid_lines += 1
+                    continue
+
+            if not isinstance(obj, dict):
+                continue
+
+            existing_id = obj.get("id")
+            if not existing_id or existing_id in session_ids:
+                continue
+
+            entries[existing_id] = {
+                "id": existing_id,
+                "thread_name": obj.get("thread_name") or existing_id,
+                "updated_at": normalize_iso(str(obj.get("updated_at", ""))),
+            }
+
+    index_file.parent.mkdir(parents=True, exist_ok=True)
+    tmp_fd, tmp_path = tempfile.mkstemp(dir=str(index_file.parent), suffix=".tmp")
+    try:
+        with os.fdopen(tmp_fd, "w", encoding="utf-8") as fh:
+            for obj in entries.values():
+                fh.write(json.dumps(obj, ensure_ascii=False, separators=(",", ":")) + "\n")
+        os.replace(tmp_path, str(index_file))
+    except BaseException:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+    if discarded_invalid_lines:
+        print(
+            f"Warning: discarded {discarded_invalid_lines} unrecoverable malformed session_index.jsonl line(s).",
+            file=sys.stderr,
+        )

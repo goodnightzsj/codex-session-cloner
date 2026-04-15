@@ -71,6 +71,18 @@ class CleanupResult:
 
 
 @dataclass(frozen=True)
+class DedupeResult:
+    provider: str
+    dry_run: bool
+    files_checked: int
+    duplicate_pairs: List[Tuple[Path, Path, str]]
+    deleted_session_ids: List[str] = field(default_factory=list)
+    deleted_files: List[Path] = field(default_factory=list)
+    backup_root: Optional[Path] = None
+    errors: List[Tuple[Path, str]] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class ValidationReport:
     source_group: str
     results: List[BundleValidationResult]

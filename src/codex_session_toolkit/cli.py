@@ -44,6 +44,7 @@ TARGET_MODEL_PROVIDER = _detect_target_model_provider()
 CLI_SUBCOMMANDS = {
     "clone-provider",
     "clean-clones",
+    "dedupe-clones",
     "list",
     "list-bundles",
     "validate-bundles",
@@ -66,6 +67,7 @@ def create_arg_parser() -> argparse.ArgumentParser:
             "Canonical toolkit commands:\n"
             "  clone-provider        Clone active sessions to the current provider\n"
             "  clean-clones          Remove legacy unmarked clone files\n"
+            "  dedupe-clones         Remove duplicate clone/original pairs conservatively\n"
             "  list                  Browse local sessions\n"
             "  list-bundles          Browse exported bundle folders\n"
             "  validate-bundles      Validate bundle folder health\n"
