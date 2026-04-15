@@ -10,6 +10,8 @@ import tempfile
 from pathlib import Path
 
 from ..errors import ToolkitError
+from ..stores.history import first_history_messages
+from ..stores.session_files import build_session_preview, is_placeholder_thread_name
 from ..support import iso_to_epoch
 
 
@@ -137,23 +139,20 @@ def upsert_threads_table(
             elif obj.get("type") == "turn_context" and not turn_context:
                 turn_context = obj.get("payload", {})
 
-    first_user_message = thread_name
-    if history_file.exists():
-        with history_file.open("r", encoding="utf-8") as fh:
-            first_line = fh.readline().strip()
-            if first_line:
-                try:
-                    first_user_message = json.loads(first_line).get("text") or first_user_message
-                except json.JSONDecodeError:
-                    pass
+    history_preview = first_history_messages(history_file).get(session_id, "")
 
     source_name = session_source or meta.get("source", "")
     originator_name = session_originator or meta.get("originator", "")
     effective_kind = session_kind or classify_session_kind(source_name, originator_name)
     cwd = session_cwd or meta.get("cwd", "")
+    first_user_message = build_session_preview(history_preview, session_file, cwd)
     created_iso = meta.get("timestamp") or last_timestamp or updated_at
     updated_iso = updated_at or last_timestamp or created_iso
-    title = thread_name or first_user_message or session_id
+    title = (
+        first_user_message
+        if is_placeholder_thread_name(thread_name, session_id)
+        else thread_name or first_user_message or session_id
+    )
     sandbox_policy = json.dumps(turn_context.get("sandbox_policy", {}), ensure_ascii=False, separators=(",", ":"))
     approval_mode = turn_context.get("approval_policy", "on-request")
     model_provider = meta.get("model_provider", "")

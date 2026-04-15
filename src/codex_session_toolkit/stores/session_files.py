@@ -20,6 +20,7 @@ _ROLLOUT_FILENAME_RE = re.compile(
     r"^rollout-(?P<ts>\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2})-"
     r"(?P<id>[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})\.jsonl$"
 )
+_UUID_VALUE_RE = re.compile(r"^[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$")
 
 
 def iter_session_files(paths: CodexPaths, *, active_only: bool = False) -> Iterable[Path]:
@@ -56,12 +57,51 @@ def normalize_session_text(text: str) -> str:
     return re.sub(r"\s+", " ", text or "").strip()
 
 
+def summarize_session_prompt(text: str) -> str:
+    normalized = normalize_session_text(text)
+    if not normalized:
+        return ""
+
+    lowered = normalized.lower()
+    request_markers = [
+        "## my request for codex:",
+        "## my request for cursor:",
+        "## my request for chatgpt:",
+        "## task",
+    ]
+    for marker in request_markers:
+        marker_index = lowered.find(marker)
+        if marker_index >= 0:
+            summary = normalized[marker_index + len(marker) :].strip()
+            return summary or normalized
+    return normalized
+
+
+def is_placeholder_thread_name(thread_name: str, session_id: str = "") -> bool:
+    normalized = normalize_session_text(thread_name)
+    if not normalized:
+        return True
+    if looks_like_session_meta_text(normalized):
+        return True
+    if session_id and normalized == session_id:
+        return True
+    return bool(_UUID_VALUE_RE.fullmatch(normalized))
+
+
 def looks_like_session_meta_text(text: str) -> bool:
     normalized = normalize_session_text(text)
     if not normalized:
         return True
 
-    return normalized.lower().startswith(
+    lowered = normalized.lower()
+    if lowered.startswith("# agents.md instructions") or lowered.startswith("# claude.md instructions") or lowered.startswith("# gemini.md instructions"):
+        return True
+    if lowered.startswith("# context from my ide setup:"):
+        return True
+    if lowered.startswith("# resume context (codex history viewer)"):
+        return True
+
+    return lowered.startswith(
         (
             "<environment_context>",
             "<permissions instructions>",
@@ -114,8 +154,9 @@ def first_user_prompt_from_session(session_file: Path) -> str:
                 elif obj.get("type") == "event_msg" and isinstance(payload, dict) and payload.get("type") == "user_message":
                     candidate = first_text_fragment(payload.get("message") or payload.get("text"))
 
-                if candidate and not looks_like_session_meta_text(candidate):
-                    return candidate
+                summarized = summarize_session_prompt(candidate)
+                if summarized and not looks_like_session_meta_text(summarized):
+                    return summarized
     except FileNotFoundError:
         pass
     return ""
@@ -137,7 +178,7 @@ def workspace_name_from_cwd(cwd: str) -> str:
 
 def build_session_preview(history_preview: str, session_file: Path, cwd: str) -> str:
     for candidate in (history_preview, first_user_prompt_from_session(session_file)):
-        normalized = normalize_session_text(candidate)
+        normalized = summarize_session_prompt(candidate)
         if normalized and not looks_like_session_meta_text(normalized):
             return normalized
 

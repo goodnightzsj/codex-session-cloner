@@ -22,8 +22,9 @@ from ..stores.bundles import (
     resolve_known_bundle_dir,
 )
 from ..stores.desktop_state import ensure_desktop_workspace_root, prepare_session_for_import, upsert_threads_table
+from ..stores.history import first_history_text
 from ..stores.index import batch_upsert_session_index, load_existing_index, upsert_session_index
-from ..stores.session_files import extract_last_timestamp, extract_session_meta_fields
+from ..stores.session_files import build_session_preview, extract_last_timestamp, extract_session_meta_fields, is_placeholder_thread_name
 from ..support import (
     classify_session_kind,
     iso_to_epoch,
@@ -111,6 +112,9 @@ def import_session(
     session_kind = manifest.get("SESSION_KIND", "") or classify_session_kind(session_source, session_originator)
     updated_at = normalize_updated_at(manifest.get("UPDATED_AT", ""), source_session, extract_last_timestamp(source_session))
     thread_name = manifest.get("THREAD_NAME", "")
+    bundle_history_preview = ""
+    if bundle_history.exists():
+        bundle_history_preview = first_history_text(bundle_history.read_text(encoding="utf-8").splitlines())
 
     state_db = paths.latest_state_db()
     desktop_env = paths.state_file.exists() or state_db is not None
@@ -178,6 +182,7 @@ def import_session(
         session_source = effective_fields["source"] or session_source
         session_originator = effective_fields["originator"] or session_originator
         session_kind = classify_session_kind(session_source, session_originator)
+        preview_thread_name = build_session_preview(bundle_history_preview, effective_session_file, session_cwd)
         effective_updated_at = normalize_updated_at(
             effective_updated_at,
             effective_session_file,
@@ -226,6 +231,8 @@ def import_session(
             if rollout_action == "preserved_newer_local"
             else thread_name or existing_index.get(session_id, {}).get("thread_name")
         )
+        if is_placeholder_thread_name(effective_thread_name or "", session_id):
+            effective_thread_name = preview_thread_name or effective_thread_name
         if not _defer_index_write:
             upsert_session_index(
                 paths.index_file,

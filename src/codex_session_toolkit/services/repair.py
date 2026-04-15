@@ -16,7 +16,7 @@ from ..paths import CodexPaths
 from ..services.provider import detect_provider
 from ..stores.history import first_history_messages
 from ..stores.index import load_existing_index
-from ..stores.session_files import iter_session_files, parse_jsonl_records
+from ..stores.session_files import build_session_preview, is_placeholder_thread_name, iter_session_files, parse_jsonl_records
 from ..support import backup_file, classify_session_kind, iso_to_epoch, nearest_existing_parent, normalize_iso
 
 
@@ -137,7 +137,6 @@ def repair_desktop(
                     raise
 
         session_meta = updated_meta
-        thread_name = existing_index.get(session_id, {}).get("thread_name") or history_first_messages.get(session_id) or session_id
         created_iso = normalize_iso(str(session_meta.get("timestamp", ""))) or normalize_iso(last_timestamp)
         updated_iso = (
             normalize_iso(last_timestamp)
@@ -146,6 +145,13 @@ def repair_desktop(
             or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         )
         cwd = session_meta.get("cwd", "") if isinstance(session_meta.get("cwd", ""), str) else ""
+        preview_title = build_session_preview(history_first_messages.get(session_id, ""), session_file, cwd)
+        existing_thread_name = existing_index.get(session_id, {}).get("thread_name", "")
+        thread_name = (
+            preview_title
+            if is_placeholder_thread_name(existing_thread_name, session_id)
+            else existing_thread_name or preview_title or session_id
+        )
         if cwd:
             candidate = nearest_existing_parent(cwd) or cwd
             if candidate and candidate not in workspace_candidates:
@@ -163,7 +169,7 @@ def repair_desktop(
                 "cwd": cwd,
                 "created_iso": created_iso or updated_iso,
                 "updated_iso": updated_iso,
-                "first_user_message": history_first_messages.get(session_id, thread_name),
+                "first_user_message": preview_title or thread_name,
                 "sandbox_policy": json.dumps(turn_context.get("sandbox_policy", {}), ensure_ascii=False, separators=(",", ":")),
                 "approval_mode": turn_context.get("approval_policy", "on-request"),
                 "model_provider": session_meta.get("model_provider", "") if isinstance(session_meta.get("model_provider", ""), str) else "",
