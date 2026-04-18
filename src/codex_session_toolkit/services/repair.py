@@ -9,6 +9,7 @@ import tempfile
 from collections import OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from ..errors import ToolkitError
 from ..models import RepairResult
@@ -18,6 +19,18 @@ from ..stores.history import first_history_messages
 from ..stores.index import load_existing_index
 from ..stores.session_files import iter_session_files, parse_jsonl_records
 from ..support import backup_file, classify_session_kind, iso_to_epoch, nearest_existing_parent, normalize_iso
+
+
+def _string_field(value: Any, default: str = "") -> str:
+    return value if isinstance(value, str) else default
+
+
+def _sqlite_value(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bytes)):
+        return value
+    if isinstance(value, (dict, list, tuple)):
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    return str(value)
 
 
 def repair_desktop(
@@ -80,8 +93,8 @@ def repair_desktop(
             skipped_sessions.append(str(session_file))
             continue
 
-        source_name = session_meta.get("source", "")
-        originator_name = session_meta.get("originator", "")
+        source_name = _string_field(session_meta.get("source"))
+        originator_name = _string_field(session_meta.get("originator"))
         session_kind = classify_session_kind(source_name, originator_name)
         desktop_like = session_kind == "desktop"
         convert_cli = include_cli and session_kind == "cli"
@@ -261,7 +274,7 @@ def repair_desktop(
                         "rollout_path": str(entry["session_file"]),
                         "created_at": iso_to_epoch(entry["created_iso"]),
                         "updated_at": iso_to_epoch(entry["updated_iso"]),
-                        "source": entry["source"] or "vscode",
+                        "source": (entry["source"] if isinstance(entry["source"], str) and entry["source"] else "vscode"),
                         "model_provider": provider,
                         "cwd": entry["cwd"],
                         "title": entry["thread_name"],
@@ -282,7 +295,7 @@ def repair_desktop(
                     col_list = ", ".join(insert_cols)
                     update_cols = [name for name in insert_cols if name != "id"]
                     update_sql = ", ".join(f"{name}=excluded.{name}" for name in update_cols)
-                    values = [data[name] for name in insert_cols]
+                    values = [_sqlite_value(data[name]) for name in insert_cols]
                     sql = f"insert into threads ({col_list}) values ({placeholders}) on conflict(id) do update set {update_sql}"
                     if not dry_run:
                         cur.execute(sql, values)
