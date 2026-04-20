@@ -21,7 +21,15 @@ from ..stores.session_files import (
     iter_session_files,
     parse_jsonl_records,
 )
-from ..support import atomic_write, backup_file, classify_session_kind, iso_to_epoch, nearest_existing_parent, normalize_iso
+from ..support import (
+    atomic_write,
+    backup_file,
+    classify_session_kind,
+    iso_to_epoch,
+    nearest_existing_parent,
+    normalize_iso,
+    prune_old_backups,
+)
 
 
 def _string_field(value: Any, default: str = "") -> str:
@@ -47,7 +55,10 @@ def repair_desktop(
         raise ToolkitError(f"Missing Codex data directory: {paths.code_dir}")
 
     provider = detect_provider(paths, explicit=target_provider)
-    backup_root = paths.code_dir / "repair_backups" / f"visibility-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
+    backup_parent = paths.code_dir / "repair_backups"
+    if not dry_run:
+        prune_old_backups(backup_parent, keep_last=20)
+    backup_root = backup_parent / f"visibility-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
     backed_up: set[str] = set()
     warnings: list[str] = []
 

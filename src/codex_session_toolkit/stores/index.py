@@ -9,7 +9,11 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Dict, Optional
 
-from ..support import atomic_write, normalize_iso
+from ..support import atomic_write, file_lock, normalize_iso
+
+
+def _lock_path(index_file: Path) -> Path:
+    return index_file.with_suffix(index_file.suffix + ".lock")
 
 
 def salvage_index_line(raw: str) -> Optional[dict]:
@@ -61,6 +65,11 @@ def load_existing_index(index_file: Path) -> Dict[str, dict]:
 
 
 def upsert_session_index(index_file: Path, session_id: str, thread_name: str, updated_at: str) -> None:
+    with file_lock(_lock_path(index_file)):
+        _upsert_session_index_locked(index_file, session_id, thread_name, updated_at)
+
+
+def _upsert_session_index_locked(index_file: Path, session_id: str, thread_name: str, updated_at: str) -> None:
     entries = OrderedDict()
     discarded_invalid_lines = 0
 
@@ -115,7 +124,11 @@ def upsert_session_index(index_file: Path, session_id: str, thread_name: str, up
 def remove_session_index_entries(index_file: Path, session_ids: set[str]) -> None:
     if not session_ids or not index_file.exists():
         return
+    with file_lock(_lock_path(index_file)):
+        _remove_session_index_entries_locked(index_file, session_ids)
 
+
+def _remove_session_index_entries_locked(index_file: Path, session_ids: set[str]) -> None:
     entries = OrderedDict()
     discarded_invalid_lines = 0
 
@@ -160,6 +173,11 @@ def batch_upsert_session_index(index_file: Path, updates: list[tuple[str, str, s
     """Upsert multiple (session_id, thread_name, updated_at) entries in a single rewrite."""
     if not updates:
         return
+    with file_lock(_lock_path(index_file)):
+        _batch_upsert_session_index_locked(index_file, updates)
+
+
+def _batch_upsert_session_index_locked(index_file: Path, updates: list[tuple[str, str, str]]) -> None:
     entries = OrderedDict()
     discarded_invalid_lines = 0
     update_ids = {sid for sid, _, _ in updates}

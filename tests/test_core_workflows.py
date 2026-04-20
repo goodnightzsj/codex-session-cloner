@@ -272,6 +272,62 @@ class SupportHelperTests(unittest.TestCase):
             with mock.patch.object(support.os.path, "abspath", return_value=short):
                 self.assertEqual(support._long_path(short), short)
 
+    def test_file_lock_serializes_cross_thread_writes(self) -> None:
+        # Verify the advisory lock actually excludes contenders. Two threads race
+        # to increment a counter stored in a small file; without the lock a
+        # read-modify-write race would drop counts; with the lock final equals 200.
+        import threading
+        from codex_session_toolkit.support import file_lock
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            counter_path = Path(tmpdir) / "counter.txt"
+            lock_path = Path(tmpdir) / "counter.lock"
+            counter_path.write_text("0", encoding="utf-8")
+
+            def bump(n: int) -> None:
+                for _ in range(n):
+                    with file_lock(lock_path):
+                        current = int(counter_path.read_text(encoding="utf-8"))
+                        counter_path.write_text(str(current + 1), encoding="utf-8")
+
+            t1 = threading.Thread(target=bump, args=(100,))
+            t2 = threading.Thread(target=bump, args=(100,))
+            t1.start(); t2.start(); t1.join(); t2.join()
+            self.assertEqual(counter_path.read_text(encoding="utf-8"), "200")
+
+    def test_prune_old_backups_keeps_only_requested_count(self) -> None:
+        import time
+        from codex_session_toolkit.support import prune_old_backups
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "backups"
+            root.mkdir()
+            dirs = []
+            for i in range(5):
+                d = root / f"dir-{i}"
+                d.mkdir()
+                (d / "marker").write_text(str(i))
+                # ensure distinct mtimes
+                os.utime(d, (1_700_000_000 + i, 1_700_000_000 + i))
+                dirs.append(d)
+
+            removed = prune_old_backups(root, keep_last=2)
+            self.assertEqual(len(removed), 3)
+            self.assertEqual({d.name for d in removed}, {"dir-0", "dir-1", "dir-2"})
+            remaining = sorted(p.name for p in root.iterdir())
+            self.assertEqual(remaining, ["dir-3", "dir-4"])
+
+    def test_prune_old_backups_noop_when_under_keep_last(self) -> None:
+        from codex_session_toolkit.support import prune_old_backups
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "backups"
+            root.mkdir()
+            (root / "only").mkdir()
+            removed = prune_old_backups(root, keep_last=5)
+            self.assertEqual(removed, [])
+            self.assertTrue((root / "only").exists())
+
     def test_safe_copy2_copies_and_preserves_mtime(self) -> None:
         from codex_session_toolkit.support import safe_copy2
 

@@ -12,7 +12,7 @@ from ..paths import CodexPaths
 from ..services.provider import detect_provider
 from ..stores.index import remove_session_index_entries
 from ..stores.session_files import iter_session_files, read_session_payload
-from ..support import backup_file
+from ..support import backup_file, prune_old_backups
 
 
 def _is_archived_session(path: Path) -> bool:
@@ -149,7 +149,9 @@ def dedupe_clones(
             duplicate_pairs=duplicate_pairs,
         )
 
-    backup_root = paths.code_dir / "repair_backups" / f"dedupe-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
+    backup_parent = paths.code_dir / "repair_backups"
+    prune_old_backups(backup_parent, keep_last=20)
+    backup_root = backup_parent / f"dedupe-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
     backed_up: set[str] = set()
     deleted_session_ids: list[str] = []
     deleted_files: list[Path] = []

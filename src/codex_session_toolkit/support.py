@@ -16,6 +16,17 @@ from .errors import ToolkitError
 from .paths import CodexPaths
 
 
+try:
+    import fcntl as _fcntl  # POSIX
+except ImportError:
+    _fcntl = None
+
+try:
+    import msvcrt as _msvcrt  # Windows
+except ImportError:
+    _msvcrt = None
+
+
 @contextmanager
 def atomic_write(
     path: Path,
@@ -45,6 +56,61 @@ def atomic_write(
         except OSError:
             pass
         raise
+
+
+@contextmanager
+def file_lock(lock_path: Path) -> Iterator[None]:
+    """Acquire an advisory exclusive file lock for the duration of the context.
+
+    Uses ``fcntl.flock`` on POSIX and ``msvcrt.locking`` on Windows. On platforms
+    where neither is available the lock is a no-op (best-effort degrade).
+    The lock file is created next to the resource (``<path>.lock``) and persists;
+    its presence between invocations is harmless.
+    """
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        if _fcntl is not None:
+            _fcntl.flock(fd, _fcntl.LOCK_EX)
+        elif _msvcrt is not None:
+            # LK_LOCK blocks up to ~10s then raises; acceptable for short index writes.
+            _msvcrt.locking(fd, _msvcrt.LK_LOCK, 1)
+        try:
+            yield
+        finally:
+            if _fcntl is not None:
+                _fcntl.flock(fd, _fcntl.LOCK_UN)
+            elif _msvcrt is not None:
+                try:
+                    _msvcrt.locking(fd, _msvcrt.LK_UNLCK, 1)
+                except OSError:
+                    pass
+    finally:
+        os.close(fd)
+
+
+def prune_old_backups(backup_parent: Path, *, keep_last: int = 20) -> list[Path]:
+    """Remove oldest ``repair_backups/*`` subdirs once count exceeds ``keep_last``.
+
+    Sort by mtime ascending, delete from the oldest end until only ``keep_last``
+    remain. Returns the list of removed paths for logging/tests. Missing parent
+    is a no-op. Errors on individual removals are suppressed so cleanup never
+    blocks the caller's primary operation.
+    """
+    if not backup_parent.exists() or not backup_parent.is_dir():
+        return []
+    children = [c for c in backup_parent.iterdir() if c.is_dir()]
+    if len(children) <= keep_last:
+        return []
+    children.sort(key=lambda p: p.stat().st_mtime)
+    removed: list[Path] = []
+    for old in children[:-keep_last]:
+        try:
+            shutil.rmtree(old, ignore_errors=True)
+            removed.append(old)
+        except OSError:
+            pass
+    return removed
 
 
 def extract_iso_timestamp(raw_value: str) -> str:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -327,7 +328,9 @@ def import_desktop_all(
     success_dirs: list[Path] = []
     failed_imports: list[tuple[Path, str]] = []
     deferred_index_entries: list[tuple[str, str, str]] = []
-    for bundle_dir in bundle_dirs:
+    total = len(bundle_dirs)
+    for i, bundle_dir in enumerate(bundle_dirs, 1):
+        print(f"[{i}/{total}] importing {bundle_dir.name}...", flush=True)
         try:
             result = import_session(
                 paths, str(bundle_dir), bundle_root=bundle_root,
@@ -337,6 +340,7 @@ def import_desktop_all(
             if result._index_entry:
                 deferred_index_entries.append(result._index_entry)
         except Exception as exc:
+            print(f"[{i}/{total}] FAILED {bundle_dir.name}: {exc}", file=sys.stderr, flush=True)
             failed_imports.append((bundle_dir, str(exc)))
 
     if deferred_index_entries:

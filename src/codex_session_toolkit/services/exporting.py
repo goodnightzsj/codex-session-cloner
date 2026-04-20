@@ -190,11 +190,14 @@ def export_sessions_for_kind(
     success_ids: list[str] = []
     failed_exports: list[tuple[str, str]] = []
 
-    for session_id in session_ids:
+    total = len(session_ids)
+    for i, session_id in enumerate(session_ids, 1):
+        print(f"[{i}/{total}] exporting {session_id}...", flush=True)
         try:
             export_session(paths, session_id, bundle_root=export_root)
             success_ids.append(session_id)
         except Exception as exc:
+            print(f"[{i}/{total}] FAILED {session_id}: {exc}", file=sys.stderr, flush=True)
             failed_exports.append((session_id, str(exc)))
 
     manifest_file = export_root / f"_{manifest_stem}_export_manifest.txt"
