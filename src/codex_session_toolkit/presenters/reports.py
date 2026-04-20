@@ -172,9 +172,11 @@ def print_batch_export_result(result: BatchExportResult) -> int:
         print("Batch export completed with partial failures.")
         sys.stdout.flush()
         print(f"Failed exports: {len(result.failed_exports)}", file=sys.stderr)
-        for session_id, reason in result.failed_exports:
+        for session_id, reason in result.failed_exports[:30]:
             print(session_id, file=sys.stderr)
             print(f"  reason: {reason}", file=sys.stderr)
+        if len(result.failed_exports) > 30:
+            print(f"... and {len(result.failed_exports) - 30} more", file=sys.stderr)
         return 1
     return 0
 
@@ -215,9 +217,11 @@ def print_batch_import_result(result: BatchImportResult) -> int:
         print("Batch import completed with partial failures.")
         sys.stdout.flush()
         print(f"Failed imports: {len(result.failed_imports)}", file=sys.stderr)
-        for failed_dir, reason in result.failed_imports:
+        for failed_dir, reason in result.failed_imports[:30]:
             print(str(failed_dir), file=sys.stderr)
             print(f"  reason: {reason}", file=sys.stderr)
+        if len(result.failed_imports) > 30:
+            print(f"... and {len(result.failed_imports) - 30} more", file=sys.stderr)
         return 1
     return 0
 
