@@ -599,7 +599,7 @@ class ToolkitTuiApp:
                 if idx == selected_index:
                     action_lines.append(style_text(f"{pointer} {label}", Ansi.BOLD, Ansi.UNDERLINE, action["color"]))
                 else:
-                    action_lines.append("  " + style_text(f"[{action['key']}]", Ansi.DIM, action["color"]) + f" {action['label']}")
+                    action_lines.append("  " + style_text(f"[{action['key']}]", Ansi.BOLD, action["color"]) + f" {action['label']}")
             for line in render_box(action_lines, width=box_width, border_codes=(Ansi.DIM, Ansi.MAGENTA)):
                 print(line)
             print("")
@@ -651,7 +651,7 @@ class ToolkitTuiApp:
                 if idx == selected_index:
                     action_lines.append(style_text(f"{pointer} {label}", Ansi.BOLD, Ansi.UNDERLINE, action["color"]))
                 else:
-                    action_lines.append("  " + style_text(f"[{action['key']}]", Ansi.DIM, action["color"]) + f" {action['label']}")
+                    action_lines.append("  " + style_text(f"[{action['key']}]", Ansi.BOLD, action["color"]) + f" {action['label']}")
             for line in render_box(action_lines, width=box_width, border_codes=(Ansi.DIM, Ansi.MAGENTA)):
                 print(line)
             print("")
@@ -1535,9 +1535,9 @@ class ToolkitTuiApp:
             f"{style_text('会话目录', Ansi.DIM)}      : {style_text(self.context.active_sessions_dir, Ansi.DIM)}",
         ]
         if danger and not dry_run:
-            info_lines.append(style_text("【危险】", Ansi.BOLD, Ansi.RED) + "将删除文件，无法恢复。")
+            info_lines.append(style_text(f"{glyphs().get('danger', '!!')} 【危险】", Ansi.BOLD, Ansi.RED) + " 将删除文件，无法恢复。")
         elif dry_run:
-            info_lines.append(style_text("【DRY-RUN】", Ansi.BOLD, Ansi.YELLOW) + "不写入/不删除。")
+            info_lines.append(style_text(f"{glyphs().get('warn', '!')} 【DRY-RUN】", Ansi.BOLD, Ansi.YELLOW) + " 不写入/不删除。")
         for line in render_box(info_lines, width=box_width, border_codes=(Ansi.DIM, Ansi.BLUE)):
             print(line)
         print("")
@@ -1550,7 +1550,7 @@ class ToolkitTuiApp:
     def _confirm_dangerous_action(self, cli_args: Sequence[str]) -> bool:
         box_width = self._print_branded_header("危险操作确认", "该操作会删除文件，且无法恢复。")
         info_lines = [
-            style_text("【危险】", Ansi.BOLD, Ansi.RED) + "Clean 会删除旧版无标记副本文件。",
+            style_text(f"{glyphs().get('danger', '!!')} 【危险】", Ansi.BOLD, Ansi.RED) + " Clean 会删除旧版无标记副本文件。",
             f"{style_text('执行方式', Ansi.DIM)} : 直接在 TUI 中执行",
             f"{style_text('影响范围', Ansi.DIM)} : 旧版无标记 clone 文件",
             "",

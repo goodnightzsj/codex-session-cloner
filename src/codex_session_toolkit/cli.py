@@ -101,7 +101,8 @@ def print_header(dry_run: bool) -> None:
     print(f"SessionsDir:   {CODEX_ACTIVE_SESSIONS_DIR}")
     print(f"ConfigFile:    {CODEX_CONFIG_PATH}")
     if dry_run:
-        print(_style("DRY-RUN MODE (no write / no delete)", Ansi.BOLD, Ansi.YELLOW))
+        from .tui.terminal import glyphs as _glyphs
+        print(_style(f"{_glyphs().get('warn', '!')} DRY-RUN MODE (no write / no delete)", Ansi.BOLD, Ansi.YELLOW))
     print(_hr())
 
 

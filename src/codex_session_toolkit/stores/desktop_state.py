@@ -50,6 +50,7 @@ def ensure_desktop_workspace_root(workspace_dir: str, state_file: Path) -> bool:
 
     with atomic_write(state_file) as fh:
         json.dump(data, fh, ensure_ascii=False, separators=(",", ":"))
+        fh.write("\n")
     return True
 
 

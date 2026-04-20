@@ -53,10 +53,16 @@ ASCII_BOX_CHARS = {"tl": "+", "tr": "+", "bl": "+", "br": "+", "h": "-", "v": "|
 UNICODE_GLYPHS = {
     "pointer": "›",
     "ellipsis": "…",
+    "danger": "✗",
+    "warn": "⚠",
+    "ok": "✓",
 }
 ASCII_GLYPHS = {
     "pointer": ">",
     "ellipsis": "...",
+    "danger": "!!",
+    "warn": "!",
+    "ok": "ok",
 }
 
 

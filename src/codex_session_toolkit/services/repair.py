@@ -248,6 +248,7 @@ def repair_desktop(
         backup_file(paths.code_dir, backup_root, backed_up, paths.state_file, enabled=True)
         with atomic_write(paths.state_file) as fh:
             json.dump(state_data, fh, ensure_ascii=False, separators=(",", ":"))
+            fh.write("\n")
 
     threads_updated = 0
     if state_db and state_db.exists():
