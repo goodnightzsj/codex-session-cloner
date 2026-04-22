@@ -9,7 +9,7 @@ from typing import List, Optional, Sequence, Set
 from ..models import ExecutionSummary, PlanItem, RunOptions
 from ..paths import ClaudePaths
 from ..services import FULL_TARGET_KEYS, SAFE_TARGET_KEYS, build_plan, execute_plan, format_bytes
-from .screen_mode import ScreenModeDecision, resolve_screen_mode
+from ...core.tui.screen_mode import ScreenModeDecision, resolve_screen_mode
 from .terminal import (
     Ansi,
     align_line,
@@ -43,16 +43,38 @@ class CleanerTuiApp:
         self._last_lines: List[str] = []
 
     def run(self) -> int:
+        import os
+        import signal
+
         last_size = (term_width(), term_height())
         plan_dirty = True
         frame_dirty = True
         plan: Sequence[PlanItem] = build_plan(self.paths, self.state.selected_keys)
 
+        # SIGWINCH (Unix only) wakes the blocking read so resize redraws fire
+        # immediately rather than waiting for the next keystroke. On Windows
+        # there is no SIGWINCH, so we fall back to a 500ms polling timeout —
+        # the existing frame_dirty / _paint_incremental machinery means
+        # idle frames cost almost nothing visually.
+        resize_pending = {"flag": False}
+        prev_handler = None
+        try:
+            sigwinch = getattr(signal, "SIGWINCH", None)
+            if sigwinch is not None:
+                def _on_winch(signum, frame):  # noqa: ARG001
+                    resize_pending["flag"] = True
+                prev_handler = signal.signal(sigwinch, _on_winch)
+        except (ValueError, OSError):
+            prev_handler = None
+
+        poll_timeout_ms = 500 if os.name == "nt" else None
+
         self._enter_terminal()
         try:
             while True:
                 current_size = (term_width(), term_height())
-                if current_size != last_size:
+                if resize_pending["flag"] or current_size != last_size:
+                    resize_pending["flag"] = False
                     last_size = current_size
                     frame_dirty = True
 
@@ -65,7 +87,7 @@ class CleanerTuiApp:
                     self._paint_frame(self._home_frame(plan))
                     frame_dirty = False
 
-                key = read_key(timeout_ms=200)
+                key = read_key(timeout_ms=poll_timeout_ms)
                 if key is None:
                     continue
                 if key in {"q", "Q", "ESC"}:
@@ -133,6 +155,11 @@ class CleanerTuiApp:
                     continue
         finally:
             self._leave_terminal()
+            try:
+                if prev_handler is not None and getattr(signal, "SIGWINCH", None) is not None:
+                    signal.signal(signal.SIGWINCH, prev_handler)
+            except (ValueError, OSError):
+                pass
 
     def _enter_terminal(self) -> None:
         self._last_frame = ""

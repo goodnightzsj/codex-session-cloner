@@ -146,7 +146,7 @@ Windows:
 .\codex-session-toolkit.ps1
 ```
 
-如果当前目录是 git 工作树，并且 `src/codex_session_toolkit/` 存在，仓库 launcher 会优先进入源码模式，这样改完代码后重新启动就能立刻生效。
+如果当前目录是 git 工作树，并且 `src/ai_cli_kit/codex/` 存在，仓库 launcher 会优先进入源码模式，这样改完代码后重新启动就能立刻生效。
 
 如果当前目录不是 git 工作树，例如 release 解压目录，launcher 会优先使用本地 `.venv` 里的已安装版本。
 
@@ -209,7 +209,9 @@ codex-session-toolkit
 也支持模块方式：
 
 ```bash
-python3 -m codex_session_toolkit
+python3 -m ai_cli_kit             # 顶层 dispatcher (= aik)
+python3 -m ai_cli_kit.codex       # 仅 Codex 子工具 (= codex-session-toolkit)
+python3 -m ai_cli_kit.claude      # 仅 Claude 子工具 (= cc-clean)
 ```
 
 ### 用工程命令管理本地开发

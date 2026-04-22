@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
 
+from ..core.support import atomic_write
 from .models import ExecutionRecord, ExecutionSummary, RunOptions
 from .paths import ClaudePaths
 from .services import _backup_file_copy
@@ -161,8 +162,19 @@ def load_old_identifier_snapshot(
 
 
 def _run_claude_refresh(timeout_seconds: int) -> None:
+    # ``shutil.which`` resolves PATHEXT-aware locations on Windows so we find
+    # ``claude.cmd`` / ``claude.exe`` wrappers without needing ``shell=True``
+    # (which would expose us to argument-quoting pitfalls). On POSIX it just
+    # returns the absolute path of ``claude`` from PATH.
+    import shutil as _shutil
+
+    executable = _shutil.which("claude")
+    if executable is None:
+        raise RuntimeError(
+            "未在 PATH 中找到 ``claude`` 可执行文件；请确认 Claude Code CLI 已安装并加入 PATH。"
+        )
     result = subprocess.run(
-        ["claude", "-p", DEFAULT_CLAUDE_PROMPT],
+        [executable, "-p", DEFAULT_CLAUDE_PROMPT],
         capture_output=True,
         text=True,
         check=False,
@@ -352,7 +364,13 @@ def _rewrite_file_in_place(path: Path, mappings: Dict[str, Tuple[str, str]]) -> 
     updated_text, change_count = outcome
     if change_count <= 0:
         return
-    path.write_text(updated_text, encoding="utf-8")
+    # Atomic write so a crash mid-rewrite cannot leave history.jsonl /
+    # session JSON in a half-mutated state. ``atomic_write`` opens with
+    # ``newline=""`` so JSONL files keep their LF-only line endings on
+    # Windows (Claude Code's own writers emit LF; mixing CRLF would break
+    # byte-equality checks downstream).
+    with atomic_write(path) as fh:
+        fh.write(updated_text)
 
 
 def _transform_file(path: Path, mappings: Dict[str, Tuple[str, str]]) -> Optional[Tuple[str, int]]:

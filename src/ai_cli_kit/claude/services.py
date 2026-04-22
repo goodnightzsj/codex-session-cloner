@@ -3,13 +3,66 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
+from ..core.support import atomic_write, long_path, safe_copy2
 from .models import CleanupTarget, ExecutionRecord, ExecutionSummary, PlanItem, RunOptions
 from .paths import ClaudePaths
+
+
+def _remove_with_retry(path: Path) -> None:
+    """``shutil.rmtree``/``Path.unlink`` with bounded Windows retry.
+
+    Windows AV scanners and indexers briefly hold files open after we touch
+    them, surfacing as transient ``PermissionError`` on remove. POSIX has no
+    such race, so we short-circuit there.
+    """
+    if path.is_dir():
+        remover = lambda p=path: shutil.rmtree(long_path(p))
+    else:
+        remover = lambda p=path: os.unlink(long_path(p))
+
+    if os.name != "nt":
+        remover()
+        return
+
+    last_exc: Optional[BaseException] = None
+    base_delay = 0.02
+    for attempt in range(5):
+        try:
+            remover()
+            return
+        except PermissionError as exc:
+            last_exc = exc
+            time.sleep(base_delay * (2 ** attempt))
+    if last_exc is not None:
+        raise last_exc
+
+
+def _move_with_retry(src: Path, dst: Path) -> None:
+    """``shutil.move`` honouring Windows long paths + transient lock retry."""
+    src_str = long_path(src)
+    dst_str = long_path(dst)
+    if os.name != "nt":
+        shutil.move(src_str, dst_str)
+        return
+
+    last_exc: Optional[BaseException] = None
+    base_delay = 0.02
+    for attempt in range(5):
+        try:
+            shutil.move(src_str, dst_str)
+            return
+        except PermissionError as exc:
+            last_exc = exc
+            time.sleep(base_delay * (2 ** attempt))
+    if last_exc is not None:
+        raise last_exc
 
 AUTH_ENV_KEYS = ("ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL")
 
@@ -323,7 +376,7 @@ def _execute_remove_path(
             raise RuntimeError("backup root was not created")
         destination = _backup_destination(paths.home, backup_root, path)
         destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(path), str(destination))
+        _move_with_retry(path, destination)
         return ExecutionRecord(
             key=item.target.key,
             status="moved",
@@ -331,10 +384,7 @@ def _execute_remove_path(
             backup_path=str(destination),
         )
 
-    if path.is_dir():
-        shutil.rmtree(path)
-    else:
-        path.unlink()
+    _remove_with_retry(path)
     return ExecutionRecord(
         key=item.target.key,
         status="deleted",
@@ -415,7 +465,20 @@ def _load_json_dict(path: Path) -> Tuple[Optional[Dict[str, object]], List[str]]
 
 
 def _write_json(path: Path, payload: Dict[str, object]) -> None:
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+    """Atomic JSON write — survives crash/SIGKILL/AC pull mid-write.
+
+    The previous direct ``path.write_text`` could leave ``~/.claude.json`` or
+    ``settings.json`` in a half-written state if the process was interrupted
+    after truncate but before the full payload landed. ``atomic_write``
+    funnels the payload through a tempfile + ``os.replace`` so observers
+    only ever see the old content or the new content, never a torn write.
+
+    ``newline=""`` keeps Python from translating ``\\n`` → ``\\r\\n`` on
+    Windows, matching how Claude Code's own writers emit these files.
+    """
+    serialized = json.dumps(payload, indent=2, ensure_ascii=True) + "\n"
+    with atomic_write(path) as fh:
+        fh.write(serialized)
 
 
 def _path_size(path: Path) -> int:
@@ -449,13 +512,34 @@ def _backup_destination(home: Path, backup_root: Path, source: Path) -> Path:
 def _backup_file_copy(home: Path, backup_root: Path, source: Path) -> Path:
     destination = _backup_destination(home, backup_root, source)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(str(source), str(destination))
+    # safe_copy2 applies the \\?\ long-path prefix on Windows so backups of
+    # deeply nested project files (>260 chars) don't fail with ENAMETOOLONG.
+    safe_copy2(source, destination)
     return destination
 
 
 def _relative_under_home(home: Path, source: Path) -> Path:
+    """Strip ``home`` from ``source`` for the backup mirror tree.
+
+    On Windows NTFS / macOS APFS-default the filesystem is case-insensitive
+    but ``Path.relative_to`` does a literal compare — ``C:\\Users\\Foo`` and
+    ``c:\\users\\foo`` would be treated as distinct, sending genuinely-local
+    files into the ``external/`` escape branch. ``os.path.normcase`` collapses
+    that on case-insensitive platforms; on POSIX it's the identity, so the
+    behaviour is unchanged there.
+    """
     try:
         return source.relative_to(home)
     except ValueError:
-        cleaned = str(source).replace(":", "").lstrip("/").replace("\\", "/")
-        return Path("external") / cleaned
+        pass
+
+    home_norm = os.path.normcase(str(home))
+    source_norm = os.path.normcase(str(source))
+    if source_norm.startswith(home_norm + os.sep):
+        # Use the original (cased) tail so the backup mirror keeps the
+        # filesystem's preferred capitalisation visible to the user.
+        relative_str = str(source)[len(str(home)) + 1:] if str(source).lower().startswith(str(home).lower()) else source_norm[len(home_norm) + 1:]
+        return Path(relative_str)
+
+    cleaned = str(source).replace(":", "").lstrip("/").replace("\\", "/")
+    return Path("external") / cleaned

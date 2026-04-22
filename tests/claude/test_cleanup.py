@@ -12,7 +12,7 @@ from ai_cli_kit.claude.models import RunOptions
 from ai_cli_kit.claude.paths import default_paths
 from ai_cli_kit.claude.services import build_plan, execute_plan, resolve_selection
 from ai_cli_kit.claude.tui.app import CleanerTuiApp
-from ai_cli_kit.claude.tui.screen_mode import (
+from ai_cli_kit.core.tui.screen_mode import (
     ALT_ENTER_FALLBACK,
     ALT_EXIT_FALLBACK,
     ScreenModeDecision,
