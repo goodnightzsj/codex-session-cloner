@@ -426,14 +426,24 @@ class ToolkitTuiApp:
 
         output = buf.getvalue()
         if output:
-            lines = output.split("\n")
+            # ``splitlines(keepends=True)`` handles both ``\n`` and ``\r\n``
+            # uniformly. ``output.split("\n")`` alone would leave stray ``\r``
+            # at the start of each line on Windows where some external print
+            # paths emit CRLF — display_width then ignores the ``\r`` but the
+            # padding still prepends, so the CR-prefixed line shows up as a
+            # carriage-return + spaces + text, overwriting earlier content.
+            lines = output.splitlines()
+            had_trailing_newline = output.endswith(("\n", "\r\n", "\r"))
             max_w = max((display_width(line) for line in lines), default=0)
             pad = max(0, (screen_width - max_w) // 2)
             if pad > 0:
                 indent = " " * pad
                 # Don't pad blank lines — they'd just push trailing whitespace
                 # into the file. Padded only when the line has visible content.
-                output = "\n".join((indent + line) if line.strip() else line for line in lines)
+                lines = [(indent + line) if line.strip() else line for line in lines]
+            output = "\n".join(lines)
+            if had_trailing_newline:
+                output += "\n"
             sys.stdout.write(output)
             sys.stdout.flush()
         return int(result or 0)
@@ -1671,11 +1681,22 @@ class ToolkitTuiApp:
         # visible "flash" between the hub and this TUI. The env flag lets us
         # share one continuous alt screen across hub → tool → hub.
         hub_active = bool(os.environ.get("AIK_HUB_ACTIVE"))
+        # Guard VT escape sequences with _WINDOWS_VT_OK: on legacy Windows
+        # cmd.exe (no VT) they print as literal ``\033[?1049h`` text and
+        # corrupt the UI. Fall back to ``clear_screen`` which knows to use
+        # ``os.system("cls")`` on those consoles.
+        from .terminal import _WINDOWS_VT_OK as _vt_ok
         if not hub_active:
-            sys.stdout.write("\033[?1049h\033[H")
-            sys.stdout.flush()
+            if _vt_ok:
+                sys.stdout.write("\033[?1049h\033[H")
+                sys.stdout.flush()
+            else:
+                clear_screen()
         else:
-            sys.stdout.write("\033[H")
+            if _vt_ok:
+                sys.stdout.write("\033[H")
+            else:
+                clear_screen()
             sys.stdout.flush()
 
         # SIGWINCH (Unix only) wakes the blocking read so resize redraws happen
@@ -1816,9 +1837,12 @@ class ToolkitTuiApp:
             # When invoked from the hub, we just clear and let the hub redraw
             # on top of the same alt-screen surface.
             if not hub_active:
-                sys.stdout.write("\033[?25h\033[?1049l")
+                if _vt_ok:
+                    sys.stdout.write("\033[?25h\033[?1049l")
+                else:
+                    clear_screen()
             else:
-                sys.stdout.write("\033[2J\033[H")
+                clear_screen()  # always safe: VT or cls fallback
             sys.stdout.flush()
             try:
                 if prev_handler is not None and getattr(signal, "SIGWINCH", None) is not None:

@@ -27,6 +27,7 @@ from .core.tui.terminal import (
     Ansi,
     COLOR_ENABLED,
     _can_encode,
+    _WINDOWS_VT_OK,
     clear_screen,
     configure_text_streams,
     display_width,
@@ -144,8 +145,18 @@ def _run_hub() -> int:
     Esc / q at the hub terminates the whole process.
     """
     selected = 0
-    sys.stdout.write("\033[?1049h\033[?25l")  # alt screen + hide cursor
-    sys.stdout.flush()
+    # Only emit VT control sequences (alt screen + cursor toggle) when the
+    # terminal can actually interpret them. On legacy Windows cmd.exe with
+    # ``_WINDOWS_VT_OK=False`` they would print as literal ``\033[?1049h``
+    # text and corrupt the UI. In that case we fall back to ``clear_screen``
+    # (which itself uses ``os.system("cls")`` on legacy consoles) and skip
+    # cursor hiding — the experience is uglier (no alt-screen, no cursor
+    # hide) but at least readable.
+    if _WINDOWS_VT_OK:
+        sys.stdout.write("\033[?1049h\033[?25l")
+        sys.stdout.flush()
+    else:
+        clear_screen()
     last_signature: Optional[tuple] = None
     try:
         while True:
@@ -178,7 +189,11 @@ def _run_hub() -> int:
             if key == "ESC" or key_lower in {"q", "quit", "exit"}:
                 return 0
     finally:
-        sys.stdout.write("\033[?25h\033[?1049l")
+        # Symmetric with the entry guard: only undo what we actually emitted.
+        if _WINDOWS_VT_OK:
+            sys.stdout.write("\033[?25h\033[?1049l")
+        else:
+            clear_screen()
         sys.stdout.flush()
 
 
@@ -190,15 +205,22 @@ def _enter_tool(tool_token: str) -> None:
     outer shell between transitions. Hub stays in alt screen the whole time;
     sub-tool just clears + renders, then clears on exit so the hub can redraw.
     """
-    sys.stdout.write("\033[2J\033[H\033[?25h")  # clear + show cursor for sub-tool prompts
+    # clear + show cursor for sub-tool prompts. clear_screen() handles the
+    # legacy-Windows fallback (os.system("cls")) when VT is unavailable;
+    # the ``\033[?25h`` cursor-show is VT-only and would print garbage on
+    # legacy cmd.exe, so guard it.
+    clear_screen()
+    if _WINDOWS_VT_OK:
+        sys.stdout.write("\033[?25h")
     sys.stdout.flush()
     os.environ["AIK_HUB_ACTIVE"] = "1"
     try:
         _dispatch_to_tool(tool_token, [])
     finally:
         os.environ.pop("AIK_HUB_ACTIVE", None)
-        sys.stdout.write("\033[?25l")  # rehide cursor for hub
-        sys.stdout.flush()
+        if _WINDOWS_VT_OK:
+            sys.stdout.write("\033[?25l")  # rehide cursor for hub
+            sys.stdout.flush()
 
 
 def _render_hub(selected: int) -> None:
@@ -207,7 +229,12 @@ def _render_hub(selected: int) -> None:
     card_width = max(40, min(cols - 4, 90))
 
     clear_screen()
-    sys.stdout.write("\033[H")
+    # ``\033[H`` is redundant — clear_screen() already homes the cursor
+    # via either ``\033[2J\033[H`` (VT) or ``os.system("cls")`` (legacy
+    # Windows). Emitting it raw on a non-VT console would print garbage,
+    # so only do it where VT is known to work.
+    if _WINDOWS_VT_OK:
+        sys.stdout.write("\033[H")
     sys.stdout.write("\n")
 
     # Pixel-art banner — uses the same wordmark composer as codex/claude so

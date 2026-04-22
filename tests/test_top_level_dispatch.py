@@ -361,6 +361,70 @@ class CodexSubflowCenteringTests(unittest.TestCase):
         single_indent = next(iter(indents))
         self.assertGreater(single_indent, 0, "runner output not indented at all")
 
+    def test_run_centered_handles_crlf_line_endings(self) -> None:
+        """Windows or external tools may emit ``\\r\\n``. Splitting on ``\\n``
+        alone leaves stray ``\\r`` that ``display_width`` ignores but that
+        the terminal interprets as a carriage return — making the padded
+        line overwrite earlier content. ``splitlines()`` normalises both.
+        """
+        if str(SRC_DIR) not in sys.path:
+            sys.path.insert(0, str(SRC_DIR))
+        import io
+        import re
+
+        from ai_cli_kit.codex.tui import app as codex_app
+        from ai_cli_kit.codex.tui.app import ToolkitAppContext, ToolkitTuiApp
+
+        original_term_width = codex_app.term_width
+        codex_app.term_width = lambda fallback=90: 100
+
+        ctx = ToolkitAppContext(
+            target_provider="demo",
+            active_sessions_dir="/tmp",
+            config_path="/tmp/x.toml",
+        )
+        app = ToolkitTuiApp(ctx)
+
+        def runner_with_crlf() -> int:
+            sys.stdout.write("alpha line\r\n")
+            sys.stdout.write("beta line\r\n")
+            return 0
+
+        buf = io.StringIO()
+        original_stdout = sys.stdout
+        sys.stdout = buf
+        try:
+            app._run_centered(runner_with_crlf)
+        finally:
+            sys.stdout = original_stdout
+            codex_app.term_width = original_term_width
+
+        captured = buf.getvalue()
+        # Critical: no bare \r should remain mid-stream — splitlines() drops
+        # them, then we rejoin with \n only. Stray \r would manifest as a
+        # carriage-return that overwrites earlier columns.
+        self.assertNotIn("\r", captured, f"stray CR in output: {captured!r}")
+        # Both lines must still be present and indented uniformly.
+        plain = re.sub(r"\x1b\[[0-9;]*m", "", captured)
+        content = [ln for ln in plain.split("\n") if ln.strip()]
+        self.assertEqual(len(content), 2)
+        indents = {len(ln) - len(ln.lstrip(" ")) for ln in content}
+        self.assertEqual(len(indents), 1, f"non-uniform indent after CRLF: {indents}")
+
+    def test_hub_alt_screen_guarded_by_windows_vt(self) -> None:
+        """Regression guard: legacy Windows cmd.exe (where _WINDOWS_VT_OK=False)
+        cannot interpret ``\\033[?1049h`` and would print it as literal text.
+        ``_run_hub`` must skip the alt-screen sequence in that case and fall
+        back to ``clear_screen`` (which itself uses ``os.system("cls")`` on
+        legacy consoles).
+        """
+        path = ROOT_DIR / "src" / "ai_cli_kit" / "cli.py"
+        text = path.read_text(encoding="utf-8")
+        # The alt-screen sequence MUST appear inside an ``if _WINDOWS_VT_OK:``
+        # block — i.e. there must be a guard somewhere in the file.
+        self.assertIn("_WINDOWS_VT_OK", text, "_WINDOWS_VT_OK guard missing from cli.py")
+        self.assertIn("if _WINDOWS_VT_OK", text, "no conditional guard around VT sequences")
+
     def test_no_bare_print_line_after_render_box(self) -> None:
         path = ROOT_DIR / "src" / "ai_cli_kit" / "codex" / "tui" / "app.py"
         text = path.read_text(encoding="utf-8")
