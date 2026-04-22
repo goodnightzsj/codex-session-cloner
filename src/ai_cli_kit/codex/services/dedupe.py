@@ -12,7 +12,7 @@ from ..paths import CodexPaths
 from ..services.provider import detect_provider
 from ..stores.index import remove_session_index_entries
 from ..stores.session_files import iter_session_files, read_session_payload
-from ..support import backup_file, prune_old_backups
+from ..support import backup_file, long_path, prune_old_backups
 
 
 def _is_archived_session(path: Path) -> bool:
@@ -59,7 +59,9 @@ def _delete_threads_rows(state_db: Path | None, deleted_session_ids: set[str]) -
     if not deleted_session_ids or state_db is None or not state_db.exists():
         return
 
-    with sqlite3.connect(state_db, timeout=30) as conn:
+    # long_path() prefixes \\?\ on Windows for paths > MAX_PATH so sqlite3
+    # (which uses CreateFileW under the hood) can open them. POSIX no-op.
+    with sqlite3.connect(long_path(state_db), timeout=30) as conn:
         cur = conn.cursor()
         row = cur.execute("select name from sqlite_master where type='table' and name='threads'").fetchone()
         if row:

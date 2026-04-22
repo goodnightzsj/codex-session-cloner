@@ -11,7 +11,7 @@ from pathlib import Path
 from ..errors import ToolkitError
 from ..stores.history import first_history_messages
 from ..stores.session_files import build_session_preview, is_placeholder_thread_name
-from ..support import atomic_write, file_lock, iso_to_epoch, lock_path_for
+from ..support import atomic_write, file_lock, iso_to_epoch, lock_path_for, long_path
 
 
 def _is_subpath(child: Path, parent: Path) -> bool:
@@ -177,7 +177,9 @@ def upsert_threads_table(
     archived = 1 if "archived_sessions" in target_rollout.parts else 0
     archived_at = iso_to_epoch(updated_iso) if archived else None
 
-    with sqlite3.connect(state_db, timeout=30) as conn:
+    # long_path() prefixes \\?\ on Windows so sqlite3 (CreateFileW under the
+    # hood) can open paths > MAX_PATH. POSIX no-op.
+    with sqlite3.connect(long_path(state_db), timeout=30) as conn:
         cur = conn.cursor()
         row = cur.execute("select name from sqlite_master where type='table' and name='threads'").fetchone()
         if not row:

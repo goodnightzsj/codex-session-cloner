@@ -425,6 +425,32 @@ class CodexSubflowCenteringTests(unittest.TestCase):
         self.assertIn("_WINDOWS_VT_OK", text, "_WINDOWS_VT_OK guard missing from cli.py")
         self.assertIn("if _WINDOWS_VT_OK", text, "no conditional guard around VT sequences")
 
+    def test_sqlite3_connect_uses_long_path_wrapper(self) -> None:
+        """Regression guard: every ``sqlite3.connect(...)`` MUST go through
+        ``long_path()`` so Windows MAX_PATH (260 chars) doesn't crash the
+        Codex Desktop SQLite path. The bare ``sqlite3.connect(state_db, ...)``
+        pattern fails on long paths because Python's sqlite3 binding does
+        NOT auto-apply the ``\\\\?\\`` Windows long-path prefix.
+        """
+        import re
+
+        sites = [
+            ROOT_DIR / "src" / "ai_cli_kit" / "codex" / "services" / "repair.py",
+            ROOT_DIR / "src" / "ai_cli_kit" / "codex" / "services" / "dedupe.py",
+            ROOT_DIR / "src" / "ai_cli_kit" / "codex" / "stores" / "desktop_state.py",
+        ]
+        for path in sites:
+            text = path.read_text(encoding="utf-8")
+            for line_no, line in enumerate(text.splitlines(), 1):
+                if "sqlite3.connect" not in line:
+                    continue
+                # Allow ``sqlite3.connect(long_path(...))`` — fail anything else.
+                self.assertTrue(
+                    re.search(r"sqlite3\.connect\(\s*long_path\(", line),
+                    f"{path.name}:{line_no} sqlite3.connect must wrap path "
+                    f"with long_path() for Windows MAX_PATH compat: {line.strip()!r}",
+                )
+
     def test_no_bare_print_line_after_render_box(self) -> None:
         path = ROOT_DIR / "src" / "ai_cli_kit" / "codex" / "tui" / "app.py"
         text = path.read_text(encoding="utf-8")

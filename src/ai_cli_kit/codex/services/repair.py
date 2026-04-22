@@ -29,6 +29,7 @@ from ..support import (
     file_lock,
     iso_to_epoch,
     lock_path_for,
+    long_path,
     nearest_existing_parent,
     normalize_iso,
     prune_old_backups,
@@ -274,7 +275,10 @@ def repair_desktop(
     if state_db and state_db.exists():
         if not dry_run:
             backup_file(paths.code_dir, backup_root, backed_up, state_db, enabled=True)
-        with sqlite3.connect(state_db, timeout=30) as conn:
+        # long_path() prefixes \\?\ on Windows when the path exceeds MAX_PATH
+        # (260 chars); sqlite3 ultimately uses CreateFileW which honours that
+        # prefix. No-op on POSIX where it just returns the original string.
+        with sqlite3.connect(long_path(state_db), timeout=30) as conn:
             cur = conn.cursor()
             row = cur.execute("select name from sqlite_master where type='table' and name='threads'").fetchone()
             if row:
