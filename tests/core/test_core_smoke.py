@@ -190,10 +190,17 @@ class CoreLauncherEnvTests(unittest.TestCase):
         from ai_cli_kit.core.launcher_env import LAUNCHER_ENV_DEFAULTS
 
         repo_root = Path(__file__).resolve().parents[2]
+        # Both the legacy per-tool launchers AND the new top-level ``aik``
+        # launchers must seed the same env contract — otherwise a user who
+        # invokes ``aik …`` would get different behaviour than ``cst …`` on
+        # Windows codepages.
         launcher_paths = [
             repo_root / "codex-session-toolkit",
             repo_root / "codex-session-toolkit.cmd",
             repo_root / "codex-session-toolkit.ps1",
+            repo_root / "aik",
+            repo_root / "aik.cmd",
+            repo_root / "aik.ps1",
         ]
         for launcher in launcher_paths:
             text = launcher.read_text(encoding="utf-8")

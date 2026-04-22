@@ -1,0 +1,10 @@
+#!/usr/bin/env sh
+# cc-clean compatibility launcher — forwards to ``aik claude …``.
+#
+# Pre-existing users have ``cc-clean`` muscle memory and shell aliases;
+# preserve that exact entry point even though the implementation now lives
+# under ``ai_cli_kit.claude``. All flags pass through unchanged.
+set -eu
+
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+exec "$SCRIPT_DIR/aik" claude "$@"

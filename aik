@@ -1,0 +1,74 @@
+#!/usr/bin/env sh
+# AI CLI Kit launcher (POSIX)
+#
+# Forwards ``aik <tool> [args…]`` to the ``ai_cli_kit`` package, choosing
+# between an installed virtualenv binary and source-mode execution the same
+# way the per-tool launchers do, and seeding the same UTF-8 env contract
+# documented in ``ai_cli_kit.core.launcher_env``.
+set -eu
+
+: "${PYTHONUTF8:=1}"
+: "${PYTHONIOENCODING:=utf-8}"
+export PYTHONUTF8 PYTHONIOENCODING
+
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+PACKAGE_DIR_NAME="ai_cli_kit"
+PACKAGE_MODULE="ai_cli_kit"
+VENV_DIR="${VENV_DIR:-$SCRIPT_DIR/.venv}"
+VENV_COMMAND="$VENV_DIR/bin/aik"
+SRC_DIR="$SCRIPT_DIR/src"
+PACKAGE_DIR="$SRC_DIR/$PACKAGE_DIR_NAME"
+LAUNCH_MODE="${AIK_LAUNCH_MODE:-${CST_LAUNCH_MODE:-${CSC_LAUNCH_MODE:-auto}}}"
+IS_GIT_WORKTREE=0
+
+if [ -d "$SCRIPT_DIR/.git" ] && [ -d "$PACKAGE_DIR" ]; then
+  IS_GIT_WORKTREE=1
+fi
+
+run_venv() {
+  echo "============================================="
+  echo " AI CLI Kit - Launcher (Local Venv)"
+  echo "============================================="
+  echo ">> $VENV_COMMAND $*"
+  exec "$VENV_COMMAND" "$@"
+}
+
+if [ "$LAUNCH_MODE" = "installed" ] && [ -x "$VENV_COMMAND" ]; then
+  run_venv "$@"
+fi
+
+if [ "$LAUNCH_MODE" = "auto" ] && [ "$IS_GIT_WORKTREE" -eq 0 ] && [ -x "$VENV_COMMAND" ]; then
+  run_venv "$@"
+fi
+
+if [ ! -d "$PACKAGE_DIR" ]; then
+  if [ -x "$VENV_COMMAND" ]; then
+    run_venv "$@"
+  fi
+  echo "Error: cannot find package source at $PACKAGE_DIR" >&2
+  echo "Tip: run ./install.sh first, or keep the src/ tree intact." >&2
+  exit 1
+fi
+
+cd "$SCRIPT_DIR"
+
+PYTHON_BIN="${PYTHON_BIN:-}"
+if [ -z "$PYTHON_BIN" ]; then
+  if command -v python3 >/dev/null 2>&1; then
+    PYTHON_BIN="python3"
+  elif command -v python >/dev/null 2>&1; then
+    PYTHON_BIN="python"
+  else
+    echo "Error: python3/python not found in PATH." >&2
+    echo "Tip: install Python 3 first, then rerun ./install.sh." >&2
+    exit 127
+  fi
+fi
+
+echo "============================================="
+echo " AI CLI Kit - Launcher (Source Mode)"
+echo "============================================="
+echo ">> $PYTHON_BIN -m $PACKAGE_MODULE $*"
+
+export PYTHONPATH="$SRC_DIR${PYTHONPATH:+:$PYTHONPATH}"
+exec "$PYTHON_BIN" -m "$PACKAGE_MODULE" "$@"

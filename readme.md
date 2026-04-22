@@ -1,11 +1,34 @@
-# Codex Session Toolkit
+# AI CLI Kit (`aik`)
 
 上游仓库：[goodnightzsj/codex-session-cloner](https://github.com/goodnightzsj/codex-session-cloner.git)
+（保留原仓库名；包名 `ai-cli-kit`，命令 `aik`）
 
-`Codex Session Toolkit` 是一个面向 Codex 会话的浏览、迁移、导入导出和修复工具箱。
-它不是单一的 clone 脚本，而是一套统一的 TUI + CLI，用来处理会话管理里最常见的几类问题。
+`ai-cli-kit` 是一个面向 AI CLI 工具的本地维护工具箱。当前打包了两个 sub-tool，共享同一套底层（原子写入 / 跨进程锁 / TUI 渲染 / 跨平台 launcher / UTF-8 注入）：
 
-![Codex Session Toolkit 界面预览](./assets/12345.png)
+| 子工具 | 命令 | 用途 |
+|---|---|---|
+| **Codex Session Toolkit** | `aik codex …` 或 `cst` / `codex-session-toolkit`（兼容） | 浏览 / 迁移 / 导入导出 / 修复 Codex 会话 |
+| **Claude Code Local Cleanup** | `aik claude …` 或 `cc-clean`（兼容） | 安全清理 Claude 本地标识 / 遥测 / 历史，自动备份 |
+
+无参运行 `aik` 进入交互式 hub，可以方向键选择进入哪个工具的 TUI。
+
+```bash
+aik                       # 顶层 hub
+aik codex                 # 直接进 Codex TUI
+aik codex clone-provider  # 直接跑子命令
+aik claude plan           # Claude 清理预览
+aik --help / --version
+```
+
+老命令（`codex-session-toolkit` / `cst` / `cc-clean`）保持原样，原有 shell 别名、脚本、习惯不需要改动。
+
+![界面预览](./assets/12345.png)
+
+---
+
+## Codex Session Toolkit
+
+下方是 Codex 子工具的完整文档（命令既可用 `aik codex …` 也可用 `codex-session-toolkit …`）。Claude 子工具的文档见文末「Claude Code Local Cleanup」一节。
 
 ## 适用场景
 
@@ -443,6 +466,50 @@ Bundle 内默认包含：
 - `CST_LAUNCH_MODE=auto|source|installed`
 
 ## 社区支持
+
+---
+
+## Claude Code Local Cleanup
+
+`aik claude` (`cc-clean` 兼容入口) 是从 [cc-clean](https://github.com/goodnightzsj/cc-clean) 合并进来的子工具，用于安全清理 Claude Code 的本地状态，**不删除整个 `~/.claude` 树**，而是按目标精细操作。
+
+### 能做什么
+
+- 清理 `~/.claude.json` 中的 `userID` 字段（不删整个文件）
+- 删除 `~/.claude/telemetry`（失败遥测缓存）
+- 删除 `~/.claude/statsig`（Statsig 稳定 ID / 会话 ID / 评估缓存）
+- 删除 `~/.claude/.credentials.json`（明文回退凭据）
+- 清理 `settings.json` 里的自定义鉴权环境变量（`ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_BASE_URL`）
+- **危险目标**（默认未勾选，需显式开启）：删除 `~/.claude/projects` / `history.jsonl` / `sessions`
+- **历史标识回写**：在生成新 `userID`/`stableID` 后，把旧标识在 projects/history/sessions 里替换为新值，方便对话连续性
+
+### 关键安全机制
+
+- **默认带备份**：执行删除前会把目标文件 / 目录移动到 `~/.claude-clean-backups/<时间戳>/<相对路径>`，可随时恢复。需要直接删除时显式 `--no-backup`。
+- **预设三档**：`safe`（默认，只清遥测和 userID）/ `full`（完整重置，含危险目标）/ `none`（全空，自己 `--select` 加项）。
+- **演练模式 `--dry-run`**：只打印计划，不动磁盘。
+
+### CLI 用法
+
+```bash
+aik claude list-targets                        # 列出所有支持的清理目标键名
+aik claude plan                                # 预览默认 safe 计划
+aik claude plan --preset full                  # 预览完整重置
+aik claude clean --preset safe --yes           # 执行 safe 清理（带备份）
+aik claude clean --preset full --dry-run --yes # 演练完整重置
+aik claude clean --select projects_dir --yes   # 精细控制：只清 projects
+aik claude remap-history --run-claude --yes    # 先跑一次 claude 生成新 ID，再回写旧记录
+
+# 兼容入口
+cc-clean plan
+cc-clean clean --preset safe --yes
+```
+
+### TUI 用法
+
+直接 `aik claude` 进入 checkbox 风格选择面板，方向键 + 空格切换勾选，预设按 a/f/n 切换，b/d 切换备份和演练模式，回车执行。
+
+---
 
 <div align="center">
 
