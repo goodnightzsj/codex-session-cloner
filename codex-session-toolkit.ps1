@@ -7,6 +7,13 @@ param(
 
 $ErrorActionPreference = "Stop"
 $packageName = "codex_session_toolkit"
+
+# Force UTF-8 so Chinese filenames / paths / TUI output are not mangled by
+# legacy Windows codepages (cp936/cp1252). Both vars are needed: PYTHONUTF8
+# enables UTF-8 mode for the interpreter, PYTHONIOENCODING covers stdio
+# wrappers that bypass the UTF-8 mode flag.
+if (-not $env:PYTHONUTF8) { $env:PYTHONUTF8 = "1" }
+if (-not $env:PYTHONIOENCODING) { $env:PYTHONIOENCODING = "utf-8" }
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $venvDir = if ($env:VENV_DIR) { $env:VENV_DIR } else { Join-Path $scriptDir ".venv" }
 $venvScriptsDir = Join-Path $venvDir "Scripts"

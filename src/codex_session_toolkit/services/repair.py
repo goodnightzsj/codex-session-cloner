@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from collections import OrderedDict
 from datetime import datetime, timezone
@@ -25,7 +26,9 @@ from ..support import (
     atomic_write,
     backup_file,
     classify_session_kind,
+    file_lock,
     iso_to_epoch,
+    lock_path_for,
     nearest_existing_parent,
     normalize_iso,
     prune_old_backups,
@@ -202,7 +205,8 @@ def repair_desktop(
 
     if not dry_run:
         backup_file(paths.code_dir, backup_root, backed_up, paths.index_file, enabled=True)
-        with atomic_write(paths.index_file) as fh:
+        # Serialise against concurrent upsert/remove on session_index.jsonl.
+        with atomic_write(paths.index_file, lock_path=lock_path_for(paths.index_file)) as fh:
             for entry in entries:
                 obj = {
                     "id": entry["id"],
@@ -211,44 +215,60 @@ def repair_desktop(
                 }
                 fh.write(json.dumps(obj, ensure_ascii=False, separators=(",", ":")) + "\n")
 
-    try:
-        state_data = json.loads(paths.state_file.read_text(encoding="utf-8")) if paths.state_file.exists() else {}
-    except (OSError, json.JSONDecodeError) as exc:
-        warnings.append(f"Warning: failed to read state file {paths.state_file}: {exc}")
-        state_data = {}
+    state_lock_path = lock_path_for(paths.state_file)
+    # Hold the state.json lock for the entire read-modify-write so concurrent
+    # ensure_desktop_workspace_root() (or other repair runs) cannot clobber
+    # the workspace-roots merge we are about to compute.
+    with file_lock(state_lock_path):
+        try:
+            state_data = json.loads(paths.state_file.read_text(encoding="utf-8")) if paths.state_file.exists() else {}
+        except (OSError, json.JSONDecodeError) as exc:
+            warnings.append(f"Warning: failed to read state file {paths.state_file}: {exc}")
+            state_data = {}
 
-    saved_roots = list(state_data.get("electron-saved-workspace-roots", []))
-    project_order = list(state_data.get("project-order", []))
+        saved_roots = list(state_data.get("electron-saved-workspace-roots", []))
+        project_order = list(state_data.get("project-order", []))
 
-    for root in workspace_candidates:
-        covered = False
-        root_path = Path(root)
-        for existing in saved_roots:
-            existing_path = Path(existing)
+        # On case-insensitive filesystems (Windows NTFS, macOS APFS-default)
+        # `relative_to` is a string compare and would treat `C:\Users\Foo`
+        # vs `c:\users\foo` as distinct, allowing duplicate workspace entries
+        # to accumulate. Compare under normcase so case-only variants dedupe.
+        def _is_subpath_ci(child: Path, parent: Path) -> bool:
             try:
-                root_path.relative_to(existing_path)
-                covered = True
-                break
+                child_norm = Path(os.path.normcase(str(child)))
+                parent_norm = Path(os.path.normcase(str(parent)))
+                child_norm.relative_to(parent_norm)
+                return True
             except ValueError:
-                pass
-        if not covered:
-            saved_roots.append(root)
-            if root not in project_order:
-                project_order.append(root)
+                return False
 
-    if not dry_run:
-        state_data["electron-saved-workspace-roots"] = saved_roots
-        state_data["active-workspace-roots"] = list(saved_roots)
-        state_data["project-order"] = project_order
-    else:
-        state_data = dict(state_data)
-        state_data["active-workspace-roots"] = list(saved_roots)
+        normcased_existing = {os.path.normcase(item) for item in saved_roots}
+        normcased_order = {os.path.normcase(item) for item in project_order}
+        for root in workspace_candidates:
+            root_path = Path(root)
+            covered = any(
+                _is_subpath_ci(root_path, Path(existing)) for existing in saved_roots
+            )
+            if not covered:
+                saved_roots.append(root)
+                normcased_existing.add(os.path.normcase(root))
+                if os.path.normcase(root) not in normcased_order:
+                    project_order.append(root)
+                    normcased_order.add(os.path.normcase(root))
 
-    if not dry_run:
-        backup_file(paths.code_dir, backup_root, backed_up, paths.state_file, enabled=True)
-        with atomic_write(paths.state_file) as fh:
-            json.dump(state_data, fh, ensure_ascii=False, separators=(",", ":"))
-            fh.write("\n")
+        if not dry_run:
+            state_data["electron-saved-workspace-roots"] = saved_roots
+            state_data["active-workspace-roots"] = list(saved_roots)
+            state_data["project-order"] = project_order
+        else:
+            state_data = dict(state_data)
+            state_data["active-workspace-roots"] = list(saved_roots)
+
+        if not dry_run:
+            backup_file(paths.code_dir, backup_root, backed_up, paths.state_file, enabled=True)
+            with atomic_write(paths.state_file) as fh:
+                json.dump(state_data, fh, ensure_ascii=False, separators=(",", ":"))
+                fh.write("\n")
 
     threads_updated = 0
     if state_db and state_db.exists():

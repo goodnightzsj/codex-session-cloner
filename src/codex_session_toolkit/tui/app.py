@@ -1361,13 +1361,15 @@ class ToolkitTuiApp:
         )
 
         hide_cursor = "\033[?25l"
-        show_cursor = "\033[?25h"
         home_cursor = "\033[H"
         clear_to_eol = "\033[K"
         clear_to_eos = "\033[J"
         visible_lines = self._fit_lines_to_screen(output_lines)
         full_output = "\n".join(line + clear_to_eol for line in visible_lines) + "\n"
-        sys.stdout.write(hide_cursor + home_cursor + full_output + clear_to_eos + show_cursor)
+        # Keep cursor hidden across frames (it is only re-shown by _await_input
+        # for typed prompts). Emitting show_cursor at end of each frame caused a
+        # 5Hz blink on the previous polling redraw loop.
+        sys.stdout.write(hide_cursor + home_cursor + full_output + clear_to_eos)
         sys.stdout.flush()
 
     def _render_section_page(self, section_index: int, action_offset: int) -> None:
@@ -1453,13 +1455,12 @@ class ToolkitTuiApp:
         )
 
         hide_cursor = "\033[?25l"
-        show_cursor = "\033[?25h"
         home_cursor = "\033[H"
         clear_to_eol = "\033[K"
         clear_to_eos = "\033[J"
         visible_lines = self._fit_lines_to_screen(output_lines)
         full_output = "\n".join(line + clear_to_eol for line in visible_lines) + "\n"
-        sys.stdout.write(hide_cursor + home_cursor + full_output + clear_to_eos + show_cursor)
+        sys.stdout.write(hide_cursor + home_cursor + full_output + clear_to_eos)
         sys.stdout.flush()
 
     def _execute_menu_action(self, chosen_action: TuiMenuAction) -> None:
@@ -1563,6 +1564,8 @@ class ToolkitTuiApp:
         return self._await_input(style_text("请输入 DELETE 确认执行：", Ansi.BOLD, Ansi.RED)).strip() == "DELETE"
 
     def run(self) -> int:
+        import signal
+
         selected_section = 0
         current_view = "home"
         section_action_offsets = {
@@ -1572,106 +1575,143 @@ class ToolkitTuiApp:
         last_size = (term_width(), term_height())
         sys.stdout.write("\033[?1049h\033[H")
         sys.stdout.flush()
+
+        # SIGWINCH (Unix only) wakes the blocking read so resize redraws happen
+        # immediately rather than waiting for the next keystroke. On Windows
+        # we fall back to a short polling timeout so resize is detected within
+        # ~0.5s without continuous redraws.
+        resize_pending = {"flag": False}
+        prev_handler = None
+        try:
+            sigwinch = getattr(signal, "SIGWINCH", None)
+            if sigwinch is not None:
+                def _on_winch(signum, frame):  # noqa: ARG001
+                    resize_pending["flag"] = True
+                prev_handler = signal.signal(sigwinch, _on_winch)
+        except (ValueError, OSError):
+            prev_handler = None
+
+        # On Windows there is no SIGWINCH; poll terminal size periodically so
+        # resize is reflected without being trapped by an indefinite blocking read.
+        poll_timeout_ms = 500 if os.name == "nt" else None
+        needs_redraw = True
         try:
             clear_screen()
             while True:
-                if current_view == "home":
-                    self._render_home(selected_section)
-                else:
-                    current_section = self.menu_sections[selected_section]
-                    current_offset = section_action_offsets[current_section.section_id]
-                    self._render_section_page(selected_section, current_offset)
+                if needs_redraw:
+                    if current_view == "home":
+                        self._render_home(selected_section)
+                    else:
+                        current_section = self.menu_sections[selected_section]
+                        current_offset = section_action_offsets[current_section.section_id]
+                        self._render_section_page(selected_section, current_offset)
+                    needs_redraw = False
 
-                key = read_key(timeout_ms=200)
+                key = read_key(timeout_ms=poll_timeout_ms)
                 current_size = (term_width(), term_height())
-                if current_size != last_size:
+                if resize_pending["flag"] or current_size != last_size:
+                    resize_pending["flag"] = False
                     last_size = current_size
+                    needs_redraw = True
                     continue
                 if key is None:
+                    # Pure polling timeout, nothing to do — keep frame untouched
+                    # so cursor & content stay completely still (no flicker).
                     continue
+                # Snapshot navigation state BEFORE handling so we can decide at
+                # the end whether anything actually changed. Unmatched keys do
+                # not flip needs_redraw → no wasted frame on stray keystrokes.
+                state_before = (
+                    current_view,
+                    selected_section,
+                    tuple(sorted(section_action_offsets.items())),
+                )
 
                 if current_view == "home":
                     if key in ("UP", "k", "K"):
                         selected_section = (selected_section - 1) % len(self.menu_sections)
-                        continue
-                    if key in ("DOWN", "j", "J"):
+                    elif key in ("DOWN", "j", "J"):
                         selected_section = (selected_section + 1) % len(self.menu_sections)
-                        continue
-                    if key in ("LEFT", "PAGE_UP"):
+                    elif key in ("LEFT", "PAGE_UP"):
                         selected_section = (selected_section - 1) % len(self.menu_sections)
-                        continue
-                    if key in ("RIGHT", "PAGE_DOWN"):
+                    elif key in ("RIGHT", "PAGE_DOWN"):
                         selected_section = (selected_section + 1) % len(self.menu_sections)
-                        continue
-
-                    if key == "ENTER":
+                    elif key == "ENTER":
                         current_view = "section"
-                        continue
-
-                    key_str = str(key).strip().lower()
-                    if key_str in {"q", "quit", "exit", "0"}:
-                        return 0
-                    if key_str in {"h", "help", "?"}:
-                        clear_screen()
-                        self._tui_help_text()
-                        continue
-                    if key_str in {"1", "2", "3"}:
-                        selected_section = min(len(self.menu_sections) - 1, int(key_str) - 1)
-                        current_view = "section"
-                        continue
-                    continue
-
-                current_section = self.menu_sections[selected_section]
-                section_actions = self._actions_for_section(current_section.section_id)
-                if not section_actions:
-                    current_view = "home"
-                    continue
-
-                current_offset = max(0, min(section_action_offsets[current_section.section_id], len(section_actions) - 1))
-                section_action_offsets[current_section.section_id] = current_offset
-
-                if key in ("UP", "k", "K"):
-                    section_action_offsets[current_section.section_id] = (current_offset - 1) % len(section_actions)
-                    continue
-                if key in ("DOWN", "j", "J"):
-                    section_action_offsets[current_section.section_id] = (current_offset + 1) % len(section_actions)
-                    continue
-                if key in ("LEFT", "PAGE_UP"):
-                    if key == "LEFT":
+                    else:
+                        key_str = str(key).strip().lower()
+                        if key_str in {"q", "quit", "exit", "0"}:
+                            return 0
+                        if key_str in {"h", "help", "?"}:
+                            clear_screen()
+                            self._tui_help_text()
+                            needs_redraw = True
+                            continue
+                        if key_str in {"1", "2", "3"}:
+                            selected_section = min(len(self.menu_sections) - 1, int(key_str) - 1)
+                            current_view = "section"
+                else:
+                    current_section = self.menu_sections[selected_section]
+                    section_actions = self._actions_for_section(current_section.section_id)
+                    if not section_actions:
                         current_view = "home"
-                        continue
-                    selected_section = (selected_section - 1) % len(self.menu_sections)
-                    continue
-                if key in ("RIGHT", "PAGE_DOWN"):
-                    selected_section = (selected_section + 1) % len(self.menu_sections)
-                    continue
+                    else:
+                        current_offset = max(
+                            0,
+                            min(section_action_offsets[current_section.section_id], len(section_actions) - 1),
+                        )
+                        section_action_offsets[current_section.section_id] = current_offset
 
-                selected_action = section_actions[current_offset][1]
-                if key == "ENTER":
-                    self._execute_menu_action(selected_action)
-                    continue
+                        if key in ("UP", "k", "K"):
+                            section_action_offsets[current_section.section_id] = (current_offset - 1) % len(section_actions)
+                        elif key in ("DOWN", "j", "J"):
+                            section_action_offsets[current_section.section_id] = (current_offset + 1) % len(section_actions)
+                        elif key == "LEFT":
+                            current_view = "home"
+                        elif key == "PAGE_UP":
+                            selected_section = (selected_section - 1) % len(self.menu_sections)
+                        elif key in ("RIGHT", "PAGE_DOWN"):
+                            selected_section = (selected_section + 1) % len(self.menu_sections)
+                        elif key == "ENTER":
+                            selected_action = section_actions[current_offset][1]
+                            self._execute_menu_action(selected_action)
+                            needs_redraw = True
+                        else:
+                            key_str = str(key).strip().lower()
+                            if key_str in {"q", "esc", "b", "back"} or key == "ESC":
+                                current_view = "home"
+                            elif key_str == "0":
+                                return 0
+                            elif key_str in {"h", "help", "?"}:
+                                clear_screen()
+                                self._tui_help_text()
+                                needs_redraw = True
+                                continue
+                            else:
+                                matched_action = None
+                                for _, menu_action in section_actions:
+                                    if menu_action.hotkey == key_str:
+                                        matched_action = menu_action
+                                        break
+                                if matched_action is not None:
+                                    self._execute_menu_action(matched_action)
+                                    needs_redraw = True
 
-                key_str = str(key).strip().lower()
-                if key_str in {"q", "esc", "b", "back"} or key == "ESC":
-                    current_view = "home"
-                    continue
-                if key_str == "0":
-                    return 0
-                if key_str in {"h", "help", "?"}:
-                    clear_screen()
-                    self._tui_help_text()
-                    continue
-
-                matched_action = None
-                for _, menu_action in section_actions:
-                    if menu_action.hotkey == key_str:
-                        matched_action = menu_action
-                        break
-                if matched_action is not None:
-                    self._execute_menu_action(matched_action)
+                state_after = (
+                    current_view,
+                    selected_section,
+                    tuple(sorted(section_action_offsets.items())),
+                )
+                if state_before != state_after:
+                    needs_redraw = True
         finally:
             sys.stdout.write("\033[?25h\033[?1049l")
             sys.stdout.flush()
+            try:
+                if prev_handler is not None and getattr(signal, "SIGWINCH", None) is not None:
+                    signal.signal(signal.SIGWINCH, prev_handler)
+            except (ValueError, OSError):
+                pass
 
 
 def run_tui(context: ToolkitAppContext) -> int:

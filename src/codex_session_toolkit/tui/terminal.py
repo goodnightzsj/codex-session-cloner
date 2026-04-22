@@ -13,6 +13,7 @@ import shutil
 import sys
 import time
 import unicodedata
+from functools import lru_cache
 from typing import List, Optional, Tuple
 
 
@@ -33,6 +34,40 @@ class Ansi:
     BRIGHT_CYAN = "\033[96m"
 
 
+def _enable_windows_vt_mode() -> bool:
+    """Best-effort enable VT (ANSI escape) processing on Windows 10+ consoles.
+
+    Without this, plain ``cmd.exe``/``conhost`` print ``\033[…m`` as literal
+    garbage. Returns True if VT is enabled (or already was), False otherwise.
+    Safe to call from non-Windows or when stdout is redirected.
+    """
+    if os.name != "nt":
+        return True
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.windll.kernel32
+        STD_OUTPUT_HANDLE = -11
+        ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004
+        INVALID_HANDLE_VALUE = wintypes.HANDLE(-1).value
+
+        handle = kernel32.GetStdHandle(STD_OUTPUT_HANDLE)
+        if handle == 0 or handle == INVALID_HANDLE_VALUE:
+            return False
+        mode = wintypes.DWORD()
+        if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            return False
+        if mode.value & ENABLE_VIRTUAL_TERMINAL_PROCESSING:
+            return True
+        return bool(kernel32.SetConsoleMode(handle, mode.value | ENABLE_VIRTUAL_TERMINAL_PROCESSING))
+    except Exception:
+        return False
+
+
+_WINDOWS_VT_OK = _enable_windows_vt_mode()
+
+
 def supports_color() -> bool:
     if os.environ.get("NO_COLOR"):
         return False
@@ -40,6 +75,9 @@ def supports_color() -> bool:
         return False
     term = os.environ.get("TERM", "")
     if term.lower() == "dumb":
+        return False
+    if os.name == "nt" and not _WINDOWS_VT_OK:
+        # Legacy cmd.exe / conhost without VT — ANSI escapes would print as garbage.
         return False
     return True
 
@@ -196,14 +234,17 @@ def is_interactive_terminal() -> bool:
 
 
 def clear_screen() -> None:
-    if os.environ.get("TERM") or os.name != "nt":
+    # Prefer ANSI on every platform: avoids the slow os.system("cls") subprocess
+    # spawn (which causes visible flicker on Windows). On Windows we already
+    # tried to enable VT in _enable_windows_vt_mode(); if that failed we fall
+    # back to os.system("cls") so ancient consoles still get a clean screen.
+    if os.name != "nt" or _WINDOWS_VT_OK or os.environ.get("TERM"):
         sys.stdout.write("\033[2J\033[H")
         sys.stdout.flush()
         return
 
-    command = "cls" if os.name == "nt" else "clear"
     try:
-        os.system(command)
+        os.system("cls")
     except Exception:
         pass
 
@@ -572,7 +613,21 @@ def _render_wordmark(
 
 
 def app_logo_lines(max_width: Optional[int] = None) -> List[str]:
-    max_width = term_width() if max_width is None else max(20, int(max_width))
+    resolved_width = term_width() if max_width is None else max(20, int(max_width))
+    return list(_app_logo_lines_cached(resolved_width, COLOR_ENABLED, _ascii_ui_active()))
+
+
+def _ascii_ui_active() -> bool:
+    return bool(_env_first("CST_ASCII_UI", "CSC_ASCII_UI"))
+
+
+@lru_cache(maxsize=32)
+def _app_logo_lines_cached(max_width: int, color_enabled: bool, ascii_ui_env: bool) -> Tuple[str, ...]:
+    return tuple(_compute_app_logo_lines(max_width))
+
+
+def _compute_app_logo_lines(max_width: int) -> List[str]:
+    max_width = max(20, int(max_width))
 
     ascii_ui = bool(_env_first("CST_ASCII_UI", "CSC_ASCII_UI"))
     if not ascii_ui and not _can_encode("█"):

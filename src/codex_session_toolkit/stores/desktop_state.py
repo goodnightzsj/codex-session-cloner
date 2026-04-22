@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import sys
 from pathlib import Path
@@ -10,16 +11,30 @@ from pathlib import Path
 from ..errors import ToolkitError
 from ..stores.history import first_history_messages
 from ..stores.session_files import build_session_preview, is_placeholder_thread_name
-from ..support import atomic_write, iso_to_epoch
+from ..support import atomic_write, file_lock, iso_to_epoch, lock_path_for
 
 
 def _is_subpath(child: Path, parent: Path) -> bool:
-    """Check if child is under parent, compatible with Python 3.8."""
+    """Case-insensitive subpath check (Win NTFS / macOS APFS-default).
+
+    On case-insensitive filesystems, ``Path.relative_to`` does a literal string
+    compare and would treat case-variant roots (``C:\\Users\\Foo`` vs
+    ``c:\\users\\foo``) as distinct. ``os.path.normcase`` normalises that
+    difference; on Linux it is the identity function so POSIX behavior is
+    unchanged.
+    """
     try:
-        child.relative_to(parent)
+        child_norm = Path(os.path.normcase(str(child)))
+        parent_norm = Path(os.path.normcase(str(parent)))
+        child_norm.relative_to(parent_norm)
         return True
     except ValueError:
         return False
+
+
+def _paths_equal_ci(a: Path, b: Path) -> bool:
+    """Case-insensitive path equality (matches ``_is_subpath`` semantics)."""
+    return os.path.normcase(str(a)) == os.path.normcase(str(b))
 
 
 def ensure_desktop_workspace_root(workspace_dir: str, state_file: Path) -> bool:
@@ -27,30 +42,37 @@ def ensure_desktop_workspace_root(workspace_dir: str, state_file: Path) -> bool:
         print(f"Warning: Codex Desktop state file not found: {state_file}", file=sys.stderr)
         return False
 
-    with state_file.open("r", encoding="utf-8") as fh:
-        data = json.load(fh)
+    # Hold the canonical state.json lock for the full read-modify-write so concurrent
+    # repair_desktop() (which also rewrites state.json) cannot clobber our addition,
+    # and vice versa. lock_path_for() ensures we share the same lock-file path.
+    with file_lock(lock_path_for(state_file)):
+        with state_file.open("r", encoding="utf-8") as fh:
+            data = json.load(fh)
 
-    saved = list(data.setdefault("electron-saved-workspace-roots", []))
-    project_order = list(data.setdefault("project-order", []))
+        saved = list(data.setdefault("electron-saved-workspace-roots", []))
+        project_order = list(data.setdefault("project-order", []))
 
-    covered = False
-    workspace_path = Path(workspace_dir)
-    for root in saved:
-        if workspace_path == Path(root) or _is_subpath(workspace_path, Path(root)):
-            covered = True
-            break
+        covered = False
+        workspace_path = Path(workspace_dir)
+        for root in saved:
+            existing = Path(root)
+            if _paths_equal_ci(workspace_path, existing) or _is_subpath(workspace_path, existing):
+                covered = True
+                break
 
-    if not covered:
-        saved.append(workspace_dir)
-        project_order.append(workspace_dir)
+        if not covered:
+            saved.append(workspace_dir)
+            normcased_order = {os.path.normcase(item) for item in project_order}
+            if os.path.normcase(workspace_dir) not in normcased_order:
+                project_order.append(workspace_dir)
 
-    data["electron-saved-workspace-roots"] = saved
-    data["active-workspace-roots"] = list(saved)
-    data["project-order"] = project_order
+        data["electron-saved-workspace-roots"] = saved
+        data["active-workspace-roots"] = list(saved)
+        data["project-order"] = project_order
 
-    with atomic_write(state_file) as fh:
-        json.dump(data, fh, ensure_ascii=False, separators=(",", ":"))
-        fh.write("\n")
+        with atomic_write(state_file) as fh:
+            json.dump(data, fh, ensure_ascii=False, separators=(",", ":"))
+            fh.write("\n")
     return True
 
 

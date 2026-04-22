@@ -33,9 +33,12 @@ from ..stores.session_files import (
 from ..support import (
     atomic_write,
     classify_session_kind,
+    file_lock,
     iso_to_epoch,
+    lock_path_for,
     nearest_existing_parent,
     normalize_bundle_root,
+    replace_with_retry,
     restrict_to_local_bundle_workspace,
     safe_copy2,
 )
@@ -49,13 +52,18 @@ from ..validation import (
 
 
 def _atomic_copy(src: Path, dst: Path) -> None:
-    """Copy src to dst atomically via tempfile + os.replace."""
+    """Copy src to dst atomically via tempfile + retrying os.replace.
+
+    Uses ``replace_with_retry`` so transient ``PermissionError`` from Windows
+    indexer/AV scanners briefly holding the destination open does not surface
+    as a user-visible import failure (matches ``atomic_write`` semantics).
+    """
     dst.parent.mkdir(parents=True, exist_ok=True)
     tmp_fd, tmp_path = tempfile.mkstemp(dir=str(dst.parent), suffix=".tmp")
     try:
         os.close(tmp_fd)
         safe_copy2(src, Path(tmp_path))
-        os.replace(tmp_path, str(dst))
+        replace_with_retry(tmp_path, str(dst))
     except BaseException:
         try:
             os.unlink(tmp_path)
@@ -175,7 +183,9 @@ def import_session(
                     "Warning: local session is newer than imported bundle; preserved local rollout and merged history only."
                 )
             else:
-                backup_path = target_session.with_name(target_session.name + f".bak.{int(time.time())}")
+                # ns granularity prevents two imports in the same second from
+                # overwriting each other's backup file.
+                backup_path = target_session.with_name(target_session.name + f".bak.{time.time_ns()}")
                 safe_copy2(target_session, backup_path)
                 _atomic_copy(prepared_source_session, target_session)
                 rollout_action = "overwritten"
@@ -205,24 +215,27 @@ def import_session(
 
         paths.history_file.parent.mkdir(parents=True, exist_ok=True)
         paths.history_file.touch(exist_ok=True)
-        existing_history_text = paths.history_file.read_text(encoding="utf-8")
-        existing_history_lines = set(existing_history_text.splitlines())
-        new_lines: list[str] = []
-        if bundle_history.exists():
-            with bundle_history.open("r", encoding="utf-8") as fh_in:
-                for raw in fh_in:
-                    stripped = raw.rstrip("\n")
-                    if not stripped or stripped in existing_history_lines:
-                        continue
-                    new_lines.append(raw if raw.endswith("\n") else raw + "\n")
-                    existing_history_lines.add(stripped)
-        if new_lines:
-            merged = existing_history_text
-            if merged and not merged.endswith("\n"):
-                merged += "\n"
-            merged += "".join(new_lines)
-            with atomic_write(paths.history_file) as fh:
-                fh.write(merged)
+        # Hold history.jsonl lock for the full read-modify-write so two concurrent
+        # imports cannot both observe the same "missing" lines and append duplicates.
+        with file_lock(lock_path_for(paths.history_file)):
+            existing_history_text = paths.history_file.read_text(encoding="utf-8")
+            existing_history_lines = set(existing_history_text.splitlines())
+            new_lines: list[str] = []
+            if bundle_history.exists():
+                with bundle_history.open("r", encoding="utf-8") as fh_in:
+                    for raw in fh_in:
+                        stripped = raw.rstrip("\n")
+                        if not stripped or stripped in existing_history_lines:
+                            continue
+                        new_lines.append(raw if raw.endswith("\n") else raw + "\n")
+                        existing_history_lines.add(stripped)
+            if new_lines:
+                merged = existing_history_text
+                if merged and not merged.endswith("\n"):
+                    merged += "\n"
+                merged += "".join(new_lines)
+                with atomic_write(paths.history_file) as fh:
+                    fh.write(merged)
 
         effective_thread_name = (
             existing_index.get(session_id, {}).get("thread_name")

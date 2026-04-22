@@ -9,11 +9,13 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Dict, Optional
 
-from ..support import atomic_write, file_lock, normalize_iso
+from ..support import atomic_write, file_lock, lock_path_for, normalize_iso
 
 
 def _lock_path(index_file: Path) -> Path:
-    return index_file.with_suffix(index_file.suffix + ".lock")
+    # Kept for backwards compat; delegates to canonical helper so every writer
+    # of the same shared file ends up on the same lock path.
+    return lock_path_for(index_file)
 
 
 def salvage_index_line(raw: str) -> Optional[dict]:

@@ -7,6 +7,7 @@ import platform
 import re
 import shutil
 import tempfile
+import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -32,12 +33,23 @@ def atomic_write(
     path: Path,
     *,
     encoding: str = "utf-8",
+    lock_path: Optional[Path] = None,
 ) -> Iterator[TextIO]:
     """Yield a text file handle that is atomically moved over ``path`` on successful close.
 
     The temporary file lives in ``path.parent`` (same filesystem → ``os.replace`` is atomic).
     If the caller raises or the final replace fails, the temp file is unlinked and the
     exception re-raised so the original ``path`` is never left half-written.
+
+    When ``lock_path`` is provided, an advisory ``file_lock`` is held for the duration
+    of the write so concurrent writers cannot interleave or clobber each other.
+    Callers that already hold the lock externally (e.g. for read-modify-write
+    sequences) MUST pass ``lock_path=None`` to avoid self-deadlock — ``file_lock``
+    is not reentrant across separate fds on POSIX.
+
+    On Windows ``os.replace`` can fail with ``PermissionError`` if the destination
+    is briefly held open by indexer/AV scanners; we retry a few times before
+    surfacing the error so transient locks don't surface as user-visible failures.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
@@ -47,10 +59,12 @@ def atomic_write(
     # level comparisons (importing.py compares read_bytes()) and mix line endings
     # for tools that later re-open the file on Windows.
     fh = os.fdopen(tmp_fd, "w", encoding=encoding, newline="")
+    lock_ctx = file_lock(lock_path) if lock_path is not None else _null_context()
     try:
-        yield fh
-        fh.close()
-        os.replace(tmp_path, str(path))
+        with lock_ctx:
+            yield fh
+            fh.close()
+            replace_with_retry(tmp_path, str(path))
     except BaseException:
         try:
             fh.close()
@@ -61,6 +75,50 @@ def atomic_write(
         except OSError:
             pass
         raise
+
+
+@contextmanager
+def _null_context() -> Iterator[None]:
+    yield
+
+
+def replace_with_retry(src: str, dst: str, *, attempts: int = 5, base_delay: float = 0.02) -> None:
+    """``os.replace`` with bounded retry to absorb transient Windows ``PermissionError``.
+
+    Windows briefly holds files open behind us (indexer, AV scanners, IDE file
+    watchers); a single ``os.replace`` may race that hold and surface as a
+    user-visible failure. Retry with exponential backoff (5 attempts ≈ 620 ms
+    cumulative max) covers the typical transient window.
+
+    On POSIX a ``PermissionError`` from ``os.replace`` indicates a real
+    permission/ownership problem — there is no transient AV-style holder — so
+    we re-raise immediately rather than burn ~620 ms before failing visibly.
+    """
+    if os.name != "nt":
+        os.replace(src, dst)
+        return
+
+    last_exc: Optional[BaseException] = None
+    for attempt in range(attempts):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError as exc:
+            last_exc = exc
+            time.sleep(base_delay * (2 ** attempt))
+    if last_exc is not None:
+        raise last_exc
+
+
+def lock_path_for(target_path: Path) -> Path:
+    """Canonical lock-file path for any data file (``<path>.lock``).
+
+    Centralised so all writers of the same shared file (session_index.jsonl,
+    history.jsonl, state.json, ...) end up serialising on the SAME lock file
+    even when they live in different stores/services modules.
+    """
+    target_path = Path(target_path)
+    return target_path.with_suffix(target_path.suffix + ".lock")
 
 
 @contextmanager
@@ -197,7 +255,11 @@ def ensure_path_within_dir(target_path: Path, base_dir: Path, label: str) -> Non
     except ValueError:
         common = ""
 
-    if common == base_real:
+    # On case-insensitive filesystems (Windows NTFS, macOS APFS-default) the
+    # raw string compare would mark `C:\Users\Foo` and `c:\users\foo` as
+    # distinct, falsely flagging legitimate paths as "escapes". normcase is a
+    # no-op on Linux so POSIX behavior is unchanged.
+    if os.path.normcase(common) == os.path.normcase(base_real):
         return
 
     raise ToolkitError(f"{label} escapes base directory: {target_path}")

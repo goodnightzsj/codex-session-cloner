@@ -12,8 +12,11 @@ if str(SRC_DIR) not in sys.path:
 
 from codex_session_toolkit import APP_COMMAND, __version__  # noqa: E402
 from codex_session_toolkit.cli import create_arg_parser  # noqa: E402
-from codex_session_toolkit.tui_app import ToolkitAppContext  # noqa: E402
-from codex_session_toolkit.tui.app import build_tui_menu_actions, build_tui_menu_sections  # noqa: E402
+from codex_session_toolkit.tui.app import (  # noqa: E402
+    ToolkitAppContext,
+    build_tui_menu_actions,
+    build_tui_menu_sections,
+)
 from codex_session_toolkit.tui.terminal import LOGO_FONT_BANNER  # noqa: E402
 
 

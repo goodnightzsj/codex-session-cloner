@@ -1,6 +1,13 @@
 #!/usr/bin/env sh
 set -eu
 
+# Force UTF-8 so Chinese filenames/paths/TUI output stay intact under POSIX
+# locales like C/POSIX where Python would otherwise default to ASCII stdio.
+# (No-op on systems whose locale is already UTF-8 — env vars are honoured.)
+: "${PYTHONUTF8:=1}"
+: "${PYTHONIOENCODING:=utf-8}"
+export PYTHONUTF8 PYTHONIOENCODING
+
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 PACKAGE_NAME="codex_session_toolkit"
 VENV_DIR="${VENV_DIR:-$SCRIPT_DIR/.venv}"

@@ -7,6 +7,7 @@ import shlex
 import shutil
 import sys
 import tempfile
+import time
 from collections import OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -109,7 +110,9 @@ def export_session(
                 fh.write(f"{key}={shlex.quote(value)}\n")
 
         if final_bundle_dir.exists():
-            old_bundle_backup = bundle_root / f".{session_id}.bak.{int(datetime.now().timestamp())}"
+            # ns granularity avoids same-second name collision when two
+            # exports for the same session_id race each other.
+            old_bundle_backup = bundle_root / f".{session_id}.bak.{time.time_ns()}"
             final_bundle_dir.rename(old_bundle_backup)
 
         stage_bundle_dir.rename(final_bundle_dir)
