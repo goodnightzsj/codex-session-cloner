@@ -28,8 +28,8 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 
-from codex_session_toolkit.errors import ToolkitError  # noqa: E402
-from codex_session_toolkit.support import (  # noqa: E402
+from ai_cli_kit.codex.errors import ToolkitError  # noqa: E402
+from ai_cli_kit.codex.support import (  # noqa: E402
     atomic_write,
     ensure_path_within_dir,
     file_lock,

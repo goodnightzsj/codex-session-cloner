@@ -3,15 +3,20 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "codex-session-toolkit"
-description = "Codex session clone, bundle transfer, and desktop repair toolkit."
+name = "ai-cli-kit"
+description = "Unified toolbox for AI CLI agents — Codex session clone/export/import/repair plus Claude Code local cleanup."
 readme = "readme.md"
 requires-python = ">=3.9"
 dependencies = []
 dynamic = ["version"]
 
 [project.scripts]
-codex-session-toolkit = "codex_session_toolkit.cli:main"
+# Top-level dispatcher (added in PR 4): ``aik <tool> <subcommand>``.
+aik = "ai_cli_kit.cli:main"
+# Backwards-compatible aliases — same console scripts pre-existing users had.
+codex-session-toolkit = "ai_cli_kit.codex.cli:main"
+cst = "ai_cli_kit.codex.cli:main"
+cc-clean = "ai_cli_kit.claude.cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -20,4 +25,4 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.dynamic]
-version = {attr = "codex_session_toolkit.__version__"}
+version = {attr = "ai_cli_kit.__version__"}

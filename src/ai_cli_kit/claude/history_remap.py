@@ -76,7 +76,14 @@ def remap_history_identifiers(
         )
         return ExecutionSummary(records=tuple(records), backup_root=None)
 
-    for file_path in _iter_candidate_files(_rewrite_roots(paths)):
+    # Snapshot the candidate set BEFORE we start writing backups. ``rglob``
+    # is lazy, and ``_rewrite_roots`` includes ``backup_root_base``; without
+    # the snapshot, the freshly-created backup files we drop into
+    # ``backup_root`` would themselves be re-discovered and re-backed-up,
+    # cascading into a path that exceeds the OS NAME_MAX limit (~255 chars
+    # on Linux ext4) and crashing with ``OSError: File name too long``.
+    candidate_files = list(_iter_candidate_files(_rewrite_roots(paths)))
+    for file_path in candidate_files:
         change_count = _inspect_rewrite_count(file_path, mappings)
         if change_count == 0:
             continue

@@ -15,19 +15,19 @@ SRC_DIR = ROOT_DIR / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from codex_session_toolkit.paths import CodexPaths  # noqa: E402
-from codex_session_toolkit.models import BundleSummary  # noqa: E402
-from codex_session_toolkit.services.browse import get_bundle_summaries, get_session_summaries, validate_bundles  # noqa: E402
-from codex_session_toolkit.services.clone import clone_to_provider  # noqa: E402
-from codex_session_toolkit.services.dedupe import dedupe_clones  # noqa: E402
-from codex_session_toolkit.services.exporting import export_active_desktop_all, export_session  # noqa: E402
-from codex_session_toolkit.services.importing import import_desktop_all, import_session  # noqa: E402
-from codex_session_toolkit.services.repair import repair_desktop  # noqa: E402
-from codex_session_toolkit.support import machine_label_to_key  # noqa: E402
-from codex_session_toolkit.stores.bundles import collect_known_bundle_summaries, latest_distinct_bundle_summaries  # noqa: E402
-from codex_session_toolkit.stores.index import load_existing_index  # noqa: E402
-from codex_session_toolkit.stores.session_files import iter_session_files, read_session_payload  # noqa: E402
-from codex_session_toolkit.validation import load_manifest, validate_relative_path  # noqa: E402
+from ai_cli_kit.codex.paths import CodexPaths  # noqa: E402
+from ai_cli_kit.codex.models import BundleSummary  # noqa: E402
+from ai_cli_kit.codex.services.browse import get_bundle_summaries, get_session_summaries, validate_bundles  # noqa: E402
+from ai_cli_kit.codex.services.clone import clone_to_provider  # noqa: E402
+from ai_cli_kit.codex.services.dedupe import dedupe_clones  # noqa: E402
+from ai_cli_kit.codex.services.exporting import export_active_desktop_all, export_session  # noqa: E402
+from ai_cli_kit.codex.services.importing import import_desktop_all, import_session  # noqa: E402
+from ai_cli_kit.codex.services.repair import repair_desktop  # noqa: E402
+from ai_cli_kit.codex.support import machine_label_to_key  # noqa: E402
+from ai_cli_kit.codex.stores.bundles import collect_known_bundle_summaries, latest_distinct_bundle_summaries  # noqa: E402
+from ai_cli_kit.codex.stores.index import load_existing_index  # noqa: E402
+from ai_cli_kit.codex.stores.session_files import iter_session_files, read_session_payload  # noqa: E402
+from ai_cli_kit.codex.validation import load_manifest, validate_relative_path  # noqa: E402
 
 
 @contextmanager
@@ -242,7 +242,7 @@ class SupportHelperTests(unittest.TestCase):
     def test_long_path_is_noop_on_posix(self) -> None:
         if os.name == "nt":
             self.skipTest("POSIX-only assertion")
-        from codex_session_toolkit.support import _long_path
+        from ai_cli_kit.codex.support import _long_path
 
         self.assertEqual(_long_path(Path("/tmp/regular/path.txt")), "/tmp/regular/path.txt")
 
@@ -252,7 +252,7 @@ class SupportHelperTests(unittest.TestCase):
         # but _long_path only needs os.fspath-able input and operates on the returned text.
         from unittest import mock
 
-        from codex_session_toolkit import support
+        from ai_cli_kit.codex import support
 
         with mock.patch.object(support.os, "name", "nt"):
             cases = [
@@ -277,7 +277,7 @@ class SupportHelperTests(unittest.TestCase):
         # to increment a counter stored in a small file; without the lock a
         # read-modify-write race would drop counts; with the lock final equals 200.
         import threading
-        from codex_session_toolkit.support import file_lock
+        from ai_cli_kit.codex.support import file_lock
 
         with tempfile.TemporaryDirectory() as tmpdir:
             counter_path = Path(tmpdir) / "counter.txt"
@@ -297,7 +297,7 @@ class SupportHelperTests(unittest.TestCase):
 
     def test_prune_old_backups_keeps_only_requested_count(self) -> None:
         import time
-        from codex_session_toolkit.support import prune_old_backups
+        from ai_cli_kit.codex.support import prune_old_backups
 
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "backups"
@@ -318,7 +318,7 @@ class SupportHelperTests(unittest.TestCase):
             self.assertEqual(remaining, ["dir-3", "dir-4"])
 
     def test_prune_old_backups_noop_when_under_keep_last(self) -> None:
-        from codex_session_toolkit.support import prune_old_backups
+        from ai_cli_kit.codex.support import prune_old_backups
 
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "backups"
@@ -332,7 +332,7 @@ class SupportHelperTests(unittest.TestCase):
         # Ensures newline="" is wired: caller writes \n, file contains LF (0x0A)
         # on disk, not CRLF. Protects Codex CLI compatibility on Windows where
         # Python's text mode would otherwise translate \n → \r\n.
-        from codex_session_toolkit.support import atomic_write
+        from ai_cli_kit.codex.support import atomic_write
 
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "file.jsonl"
@@ -344,7 +344,7 @@ class SupportHelperTests(unittest.TestCase):
             self.assertNotIn(b"\r\n", raw)
 
     def test_safe_copy2_copies_and_preserves_mtime(self) -> None:
-        from codex_session_toolkit.support import safe_copy2
+        from ai_cli_kit.codex.support import safe_copy2
 
         with tempfile.TemporaryDirectory() as tmpdir:
             src = Path(tmpdir) / "src.txt"
@@ -358,25 +358,25 @@ class SupportHelperTests(unittest.TestCase):
 
 class SessionPreviewHelperTests(unittest.TestCase):
     def test_summarize_session_prompt_strips_ide_request_marker(self) -> None:
-        from codex_session_toolkit.stores.session_files import summarize_session_prompt
+        from ai_cli_kit.codex.stores.session_files import summarize_session_prompt
 
         text = "# Context from my IDE setup:\n\n## Open tabs:\n- a.py\n\n## My request for Codex:\n修复 bug"
         self.assertEqual(summarize_session_prompt(text), "修复 bug")
 
     def test_summarize_session_prompt_strips_task_marker(self) -> None:
-        from codex_session_toolkit.stores.session_files import summarize_session_prompt
+        from ai_cli_kit.codex.stores.session_files import summarize_session_prompt
 
         text = "# Resume context\n---\n## Task\n继续执行"
         self.assertEqual(summarize_session_prompt(text), "继续执行")
 
     def test_summarize_session_prompt_no_marker_returns_normalized_input(self) -> None:
-        from codex_session_toolkit.stores.session_files import summarize_session_prompt
+        from ai_cli_kit.codex.stores.session_files import summarize_session_prompt
 
         self.assertEqual(summarize_session_prompt("  hello   world  "), "hello world")
         self.assertEqual(summarize_session_prompt(""), "")
 
     def test_is_placeholder_thread_name_detects_uuid_and_empty(self) -> None:
-        from codex_session_toolkit.stores.session_files import is_placeholder_thread_name
+        from ai_cli_kit.codex.stores.session_files import is_placeholder_thread_name
 
         self.assertTrue(is_placeholder_thread_name(""))
         self.assertTrue(is_placeholder_thread_name("   "))
@@ -387,7 +387,7 @@ class SessionPreviewHelperTests(unittest.TestCase):
         self.assertFalse(is_placeholder_thread_name("修复 bug"))
 
     def test_is_placeholder_thread_name_flags_session_meta_markers(self) -> None:
-        from codex_session_toolkit.stores.session_files import is_placeholder_thread_name
+        from ai_cli_kit.codex.stores.session_files import is_placeholder_thread_name
 
         self.assertTrue(is_placeholder_thread_name("<environment_context>"))
         self.assertTrue(is_placeholder_thread_name("# AGENTS.md instructions"))
@@ -395,7 +395,7 @@ class SessionPreviewHelperTests(unittest.TestCase):
 
 class IndexStoreHelperTests(unittest.TestCase):
     def test_remove_session_index_entries_drops_requested_ids(self) -> None:
-        from codex_session_toolkit.stores.index import (
+        from ai_cli_kit.codex.stores.index import (
             load_existing_index,
             remove_session_index_entries,
             upsert_session_index,
@@ -414,7 +414,7 @@ class IndexStoreHelperTests(unittest.TestCase):
             self.assertIn("sid-3", remaining)
 
     def test_remove_session_index_entries_is_noop_for_missing_file(self) -> None:
-        from codex_session_toolkit.stores.index import remove_session_index_entries
+        from ai_cli_kit.codex.stores.index import remove_session_index_entries
 
         with tempfile.TemporaryDirectory() as tmpdir:
             missing = Path(tmpdir) / "nope.jsonl"
@@ -1147,7 +1147,7 @@ class CoreWorkflowTests(unittest.TestCase):
     def test_resolve_bundle_by_session_id_is_case_insensitive(self) -> None:
         # Bundle exported with mixed-case id 'ABc...' should resolve when looked
         # up with lowercase 'abc...' (case-insensitive FS on Windows/macOS).
-        from codex_session_toolkit.stores.bundles import resolve_known_bundle_dir
+        from ai_cli_kit.codex.stores.bundles import resolve_known_bundle_dir
 
         with tempfile.TemporaryDirectory() as tmpdir:
             workspace = Path(tmpdir) / "workspace"

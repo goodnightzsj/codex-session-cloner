@@ -6,7 +6,12 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$packageName = "codex_session_toolkit"
+# After PR 3 the codex CLI lives at ai_cli_kit.codex; ``packageDir`` probes the
+# subpackage directory and ``packageModule`` is what ``python -m`` runs. The
+# console-script name and console-visible labels stay ``codex-session-toolkit``
+# for backwards compatibility — same wrappers, new home.
+$packageDirName = "ai_cli_kit"
+$packageModule = "ai_cli_kit.codex"
 
 # Force UTF-8 so Chinese filenames / paths / TUI output are not mangled by
 # legacy Windows codepages (cp936/cp1252). Both vars are needed: PYTHONUTF8
@@ -20,7 +25,7 @@ $venvScriptsDir = Join-Path $venvDir "Scripts"
 $installedExe = Join-Path $venvScriptsDir "codex-session-toolkit.exe"
 $installedCmd = Join-Path $venvScriptsDir "codex-session-toolkit.cmd"
 $srcDir = Join-Path $scriptDir "src"
-$packageDir = Join-Path $srcDir $packageName
+$packageDir = Join-Path (Join-Path $srcDir $packageDirName) "codex"
 $launchMode = if ($env:CST_LAUNCH_MODE) { $env:CST_LAUNCH_MODE } elseif ($env:CSC_LAUNCH_MODE) { $env:CSC_LAUNCH_MODE } else { "auto" }
 $isGitWorktree = (Test-Path (Join-Path $scriptDir ".git")) -and (Test-Path $packageDir)
 
@@ -84,7 +89,7 @@ if ($pyCmd.Length -gt 1) {
 Write-Host "=============================================" -ForegroundColor Cyan
 Write-Host " Codex Session Toolkit - Launcher (Source Mode)" -ForegroundColor Cyan
 Write-Host "=============================================" -ForegroundColor Cyan
-Write-Host ">> $pythonExe $($pythonPreArgs -join ' ') -m $packageName $($PassthroughArgs -join ' ')" -ForegroundColor DarkGray
+Write-Host ">> $pythonExe $($pythonPreArgs -join ' ') -m $packageModule $($PassthroughArgs -join ' ')" -ForegroundColor DarkGray
 
 if ($env:PYTHONPATH) {
     $env:PYTHONPATH = "$srcDir;$($env:PYTHONPATH)"
@@ -92,5 +97,5 @@ if ($env:PYTHONPATH) {
     $env:PYTHONPATH = $srcDir
 }
 
-& $pythonExe @pythonPreArgs -m $packageName @PassthroughArgs
+& $pythonExe @pythonPreArgs -m $packageModule @PassthroughArgs
 exit $LASTEXITCODE

@@ -10,14 +10,14 @@ SRC_DIR = ROOT_DIR / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from codex_session_toolkit import APP_COMMAND, __version__  # noqa: E402
-from codex_session_toolkit.cli import create_arg_parser  # noqa: E402
-from codex_session_toolkit.tui.app import (  # noqa: E402
+from ai_cli_kit.codex import APP_COMMAND, __version__  # noqa: E402
+from ai_cli_kit.codex.cli import create_arg_parser  # noqa: E402
+from ai_cli_kit.codex.tui.app import (  # noqa: E402
     ToolkitAppContext,
     build_tui_menu_actions,
     build_tui_menu_sections,
 )
-from codex_session_toolkit.tui.terminal import LOGO_FONT_BANNER  # noqa: E402
+from ai_cli_kit.codex.tui.terminal import LOGO_FONT_BANNER  # noqa: E402
 
 
 def _module_env() -> dict:
@@ -83,7 +83,7 @@ class PackagingSmokeTests(unittest.TestCase):
 
     def test_module_help_mentions_packaged_command(self) -> None:
         result = subprocess.run(
-            [sys.executable, "-m", "codex_session_toolkit", "--help"],
+            [sys.executable, "-m", "ai_cli_kit.codex", "--help"],
             cwd=ROOT_DIR,
             env=_module_env(),
             stdout=subprocess.PIPE,
@@ -96,7 +96,7 @@ class PackagingSmokeTests(unittest.TestCase):
 
     def test_module_version_matches_package_version(self) -> None:
         result = subprocess.run(
-            [sys.executable, "-m", "codex_session_toolkit", "--version"],
+            [sys.executable, "-m", "ai_cli_kit.codex", "--version"],
             cwd=ROOT_DIR,
             env=_module_env(),
             stdout=subprocess.PIPE,

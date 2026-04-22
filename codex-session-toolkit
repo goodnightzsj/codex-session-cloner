@@ -9,11 +9,15 @@ set -eu
 export PYTHONUTF8 PYTHONIOENCODING
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-PACKAGE_NAME="codex_session_toolkit"
+# After PR 3 the codex CLI lives under ai_cli_kit.codex; the package directory
+# probe + ``python -m`` target both reflect that. The console script name and
+# user-facing command stay ``codex-session-toolkit`` for backwards compatibility.
+PACKAGE_DIR_NAME="ai_cli_kit"
+PACKAGE_MODULE="ai_cli_kit.codex"
 VENV_DIR="${VENV_DIR:-$SCRIPT_DIR/.venv}"
 VENV_COMMAND="$VENV_DIR/bin/codex-session-toolkit"
 SRC_DIR="$SCRIPT_DIR/src"
-PACKAGE_DIR="$SRC_DIR/$PACKAGE_NAME"
+PACKAGE_DIR="$SRC_DIR/$PACKAGE_DIR_NAME/codex"
 LAUNCH_MODE="${CST_LAUNCH_MODE:-${CSC_LAUNCH_MODE:-auto}}"
 IS_GIT_WORKTREE=0
 
@@ -30,7 +34,7 @@ run_venv() {
 }
 
 if [ ! -d "$PACKAGE_DIR" ] && [ "$LAUNCH_MODE" = "source" ]; then
-  echo "Error: cannot find package source at $SRC_DIR/$PACKAGE_NAME" >&2
+  echo "Error: cannot find package source at $PACKAGE_DIR" >&2
   echo "Tip: run ./install.sh first, or keep the src/ tree intact." >&2
   exit 1
 fi
@@ -47,7 +51,7 @@ if [ ! -d "$PACKAGE_DIR" ]; then
   if [ -x "$VENV_COMMAND" ]; then
     run_venv "$@"
   fi
-  echo "Error: cannot find package source at $SRC_DIR/$PACKAGE_NAME" >&2
+  echo "Error: cannot find package source at $PACKAGE_DIR" >&2
   echo "Tip: run ./install.sh first, or keep the src/ tree intact." >&2
   exit 1
 fi
@@ -70,7 +74,7 @@ fi
 echo "============================================="
 echo " Codex Session Toolkit - Launcher (Source Mode)"
 echo "============================================="
-echo ">> $PYTHON_BIN -m $PACKAGE_NAME $*"
+echo ">> $PYTHON_BIN -m $PACKAGE_MODULE $*"
 
 export PYTHONPATH="$SRC_DIR${PYTHONPATH:+:$PYTHONPATH}"
-exec "$PYTHON_BIN" -m "$PACKAGE_NAME" "$@"
+exec "$PYTHON_BIN" -m "$PACKAGE_MODULE" "$@"

@@ -7,19 +7,19 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from cc_clean.history_remap import remap_history_identifiers
-from cc_clean.models import RunOptions
-from cc_clean.paths import default_paths
-from cc_clean.services import build_plan, execute_plan, resolve_selection
-from cc_clean.tui.app import CleanerTuiApp
-from cc_clean.tui.screen_mode import (
+from ai_cli_kit.claude.history_remap import remap_history_identifiers
+from ai_cli_kit.claude.models import RunOptions
+from ai_cli_kit.claude.paths import default_paths
+from ai_cli_kit.claude.services import build_plan, execute_plan, resolve_selection
+from ai_cli_kit.claude.tui.app import CleanerTuiApp
+from ai_cli_kit.claude.tui.screen_mode import (
     ALT_ENTER_FALLBACK,
     ALT_EXIT_FALLBACK,
     ScreenModeDecision,
     TerminfoScreenCaps,
     resolve_screen_mode,
 )
-from cc_clean.tui.terminal import app_logo_lines, display_width, render_box
+from ai_cli_kit.claude.tui.terminal import app_logo_lines, display_width, render_box
 
 
 class CleanupWorkflowTests(unittest.TestCase):
@@ -129,7 +129,7 @@ class CleanupWorkflowTests(unittest.TestCase):
 
             app = CleanerTuiApp(paths)
             plan = build_plan(paths, resolve_selection("safe"))
-            with patch("cc_clean.tui.app.term_height", return_value=24):
+            with patch("ai_cli_kit.claude.tui.app.term_height", return_value=24):
                 lines = app._frame_lines(app._home_frame(plan))
 
             self.assertLessEqual(len(lines), 24)
@@ -394,7 +394,7 @@ class CleanupWorkflowTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with patch("cc_clean.history_remap.subprocess.run") as mocked_run:
+            with patch("ai_cli_kit.claude.history_remap.subprocess.run") as mocked_run:
                 mocked_run.return_value.returncode = 0
                 mocked_run.return_value.stdout = "ok"
                 mocked_run.return_value.stderr = ""

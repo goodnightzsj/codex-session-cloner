@@ -1,4 +1,4 @@
-"""Module entrypoint for `python -m cc_clean`."""
+"""Module entrypoint for `python -m ai_cli_kit.claude`."""
 
 from .cli import main
 

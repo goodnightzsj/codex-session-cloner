@@ -1,8 +1,8 @@
 """Smoke tests for the extracted ``core`` package.
 
 These verify the **structural promise** of PR 1: tool-agnostic primitives are
-importable from ``codex_session_toolkit.core.*`` AND the legacy import paths
-(``codex_session_toolkit.support`` / ``codex_session_toolkit.tui.terminal``)
+importable from ``ai_cli_kit.core.*`` AND the legacy import paths
+(``ai_cli_kit.codex.support`` / ``ai_cli_kit.codex.tui.terminal``)
 still expose the same symbols, so cc-clean integration in PR 2/3 has a stable
 contract to land on without breaking existing call sites.
 """
@@ -23,7 +23,7 @@ if str(SRC_DIR) not in sys.path:
 
 class CoreSupportImportTests(unittest.TestCase):
     def test_core_support_exposes_primitives(self) -> None:
-        from codex_session_toolkit.core import support as core_support
+        from ai_cli_kit.core import support as core_support
 
         for name in (
             "PathEscapeError",
@@ -40,12 +40,12 @@ class CoreSupportImportTests(unittest.TestCase):
             self.assertTrue(hasattr(core_support, name), f"core.support is missing {name!r}")
 
     def test_legacy_support_reexports_match_core(self) -> None:
-        """`codex_session_toolkit.support` MUST keep exporting the same symbols.
+        """`ai_cli_kit.codex.support` MUST keep exporting the same symbols.
 
         PR 3 will migrate call sites; until then re-exports are load-bearing.
         """
-        from codex_session_toolkit import support as legacy
-        from codex_session_toolkit.core import support as core_support
+        from ai_cli_kit.codex import support as legacy
+        from ai_cli_kit.core import support as core_support
 
         for name in (
             "atomic_write",
@@ -60,14 +60,14 @@ class CoreSupportImportTests(unittest.TestCase):
 
     def test_legacy_long_path_alias_remains(self) -> None:
         """The underscore-prefixed alias is still imported by some sites."""
-        from codex_session_toolkit.support import _long_path, long_path
+        from ai_cli_kit.codex.support import _long_path, long_path
 
         self.assertIs(_long_path, long_path)
 
 
 class CoreTuiImportTests(unittest.TestCase):
     def test_core_tui_exposes_primitives(self) -> None:
-        from codex_session_toolkit.core.tui import terminal as core_terminal
+        from ai_cli_kit.core.tui import terminal as core_terminal
 
         for name in (
             "Ansi",
@@ -93,8 +93,8 @@ class CoreTuiImportTests(unittest.TestCase):
             self.assertTrue(hasattr(core_terminal, name), f"core.tui.terminal is missing {name!r}")
 
     def test_legacy_terminal_reexports_match_core(self) -> None:
-        from codex_session_toolkit.core.tui import terminal as core_terminal
-        from codex_session_toolkit.tui import terminal as legacy
+        from ai_cli_kit.core.tui import terminal as core_terminal
+        from ai_cli_kit.codex.tui import terminal as legacy
 
         for name in (
             "Ansi",
@@ -113,13 +113,13 @@ class CoreTuiImportTests(unittest.TestCase):
 
     def test_codex_logo_helpers_still_resolve(self) -> None:
         """Codex-specific symbols must remain on ``tui.terminal``."""
-        from codex_session_toolkit.tui import terminal as legacy
+        from ai_cli_kit.codex.tui import terminal as legacy
 
         for name in ("LOGO_FONT_BANNER", "app_logo_lines", "tui_width"):
             self.assertTrue(hasattr(legacy, name), f"tui.terminal is missing codex-specific {name!r}")
 
     def test_app_logo_lines_returns_strings(self) -> None:
-        from codex_session_toolkit.tui.terminal import app_logo_lines
+        from ai_cli_kit.codex.tui.terminal import app_logo_lines
 
         lines = app_logo_lines(80)
         self.assertGreater(len(lines), 0)
@@ -129,7 +129,7 @@ class CoreTuiImportTests(unittest.TestCase):
 
 class CoreScreenModeTests(unittest.TestCase):
     def test_resolve_returns_main_when_stdout_is_not_tty(self) -> None:
-        from codex_session_toolkit.core.tui.screen_mode import (
+        from ai_cli_kit.core.tui.screen_mode import (
             resolve_screen_mode,
             TerminfoScreenCaps,
         )
@@ -153,7 +153,7 @@ class CoreScreenModeTests(unittest.TestCase):
         self.assertIn("TTY", decision.reason)
 
     def test_explicit_main_override_honored(self) -> None:
-        from codex_session_toolkit.core.tui.screen_mode import resolve_screen_mode
+        from ai_cli_kit.core.tui.screen_mode import resolve_screen_mode
 
         decision = resolve_screen_mode(
             requested="main",
@@ -163,7 +163,7 @@ class CoreScreenModeTests(unittest.TestCase):
         self.assertIn("forced", decision.reason)
 
     def test_normalize_screen_mode_rejects_garbage(self) -> None:
-        from codex_session_toolkit.core.tui.screen_mode import normalize_screen_mode
+        from ai_cli_kit.core.tui.screen_mode import normalize_screen_mode
 
         self.assertEqual(normalize_screen_mode("ALT"), "alt")
         self.assertEqual(normalize_screen_mode("  Main  "), "main")
@@ -173,13 +173,13 @@ class CoreScreenModeTests(unittest.TestCase):
 
 class CoreLauncherEnvTests(unittest.TestCase):
     def test_launcher_env_defaults_cover_utf8_keys(self) -> None:
-        from codex_session_toolkit.core.launcher_env import LAUNCHER_ENV_DEFAULTS
+        from ai_cli_kit.core.launcher_env import LAUNCHER_ENV_DEFAULTS
 
         self.assertEqual(LAUNCHER_ENV_DEFAULTS["PYTHONUTF8"], "1")
         self.assertEqual(LAUNCHER_ENV_DEFAULTS["PYTHONIOENCODING"], "utf-8")
 
     def test_env_was_seeded_detects_present_and_absent(self) -> None:
-        from codex_session_toolkit.core.launcher_env import env_was_seeded
+        from ai_cli_kit.core.launcher_env import env_was_seeded
 
         self.assertTrue(env_was_seeded({"PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}))
         self.assertFalse(env_was_seeded({"PYTHONUTF8": "1"}))
@@ -187,7 +187,7 @@ class CoreLauncherEnvTests(unittest.TestCase):
 
     def test_launcher_scripts_seed_the_env_vars(self) -> None:
         """Spec/code parity: the launcher scripts must mention each defaulted name."""
-        from codex_session_toolkit.core.launcher_env import LAUNCHER_ENV_DEFAULTS
+        from ai_cli_kit.core.launcher_env import LAUNCHER_ENV_DEFAULTS
 
         repo_root = Path(__file__).resolve().parents[2]
         launcher_paths = [

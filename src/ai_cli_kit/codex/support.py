@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from .core.support import (
+from ..core.support import (
     PathEscapeError,
     atomic_write,
     file_lock,
@@ -30,7 +30,7 @@ from .core.support import (
     replace_with_retry,
     safe_copy2,
 )
-from .core.support import ensure_path_within_dir as _core_ensure_path_within_dir
+from ..core.support import ensure_path_within_dir as _core_ensure_path_within_dir
 from .errors import ToolkitError
 from .paths import CodexPaths
 

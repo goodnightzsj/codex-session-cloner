@@ -3,7 +3,7 @@
 Tool-agnostic primitives (Ansi, color detection, box drawing, glyph tables,
 display-width math, ``term_width`` / ``term_height``, ``read_key``,
 ``render_box``, ``clear_screen``, etc.) live in
-``codex_session_toolkit.core.tui.terminal`` and are re-exported below for
+``ai_cli_kit.codex.core.tui.terminal`` and are re-exported below for
 backwards compatibility — every ``from .terminal import …`` site keeps working
 without changes.
 
@@ -20,7 +20,7 @@ from functools import lru_cache
 from typing import List, Optional, Tuple
 
 # Re-export every tool-agnostic primitive so existing call sites keep working.
-from ..core.tui.terminal import (  # noqa: F401
+from ...core.tui.terminal import (  # noqa: F401
     ANSI_ESCAPE_RE,
     ASCII_BOX_CHARS,
     ASCII_GLYPHS,
