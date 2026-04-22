@@ -11,14 +11,25 @@
 
 ![界面预览](./assets/12345.png)
 
-## 快速开始
+## 选哪种运行方式？
+
+| 方式 | 命令 | 需要安装吗？ | 会在 PATH 里多命令吗？ |
+|---|---|---|---|
+| **launcher 直跑（最省事）** | `./aik` / `./codex-session-toolkit` / `./cc-clean` | ❌ 不需要 | ❌ 否（项目目录内） |
+| **`python -m` 直跑** | `python -m ai_cli_kit[.codex|.claude]` | ✅ 需要（或 `PYTHONPATH=src`） | ❌ 否 |
+| **标准安装 + console scripts** | 全局 `aik` / `cst` / `cc-clean` | ✅ `./install.sh` | ✅ venv/bin 注册 4 个命令 |
+| **极简安装（不要命令）** | `./install.sh --no-scripts` + `python -m ai_cli_kit` | ✅ 但仅装包 | ❌ 否（脚本被剔除） |
+
+不知道选哪个？**直接 `git clone` 后跑 `./aik`**，零安装、零污染、立即可用。
 
 ### 一键安装（macOS / Linux）
 
 ```bash
 chmod +x install.sh aik cc-clean codex-session-toolkit codex-session-toolkit.command
-./install.sh
-./aik             # 进入交互菜单，选 Codex 或 CC Clean
+./install.sh                  # 标准安装：venv/bin 注册 aik / cst / codex-session-toolkit / cc-clean
+./install.sh --no-scripts     # 极简安装：装包但不注册任何命令，只能 python -m 用
+./install.sh --editable       # 开发模式（pip install -e）
+./aik                         # 进入交互菜单
 ```
 
 ### 一键安装（Windows）
@@ -26,20 +37,33 @@ chmod +x install.sh aik cc-clean codex-session-toolkit codex-session-toolkit.com
 双击 `install.bat`，再双击 `aik.cmd`。或：
 
 ```powershell
-.\install.ps1
+.\install.ps1                 # 标准安装
+.\install.ps1 -NoScripts      # 极简安装：装包但不注册命令
 .\aik.cmd
+```
+
+### `python -m` 直跑（不想注册任何命令）
+
+```bash
+# 在项目目录内（无需 pip install）
+PYTHONPATH=src python -m ai_cli_kit              # 顶层菜单
+PYTHONPATH=src python -m ai_cli_kit.codex        # 直接进 Codex
+PYTHONPATH=src python -m ai_cli_kit.claude       # 直接进 CC Clean
+
+# 或者用 make 包裹（自动设 PYTHONPATH）
+make run            # 顶层菜单
+make run-codex      # Codex 子工具
+make run-claude     # CC Clean
+
+# 已 pip install 后（无需 PYTHONPATH，任意目录）
+python -m ai_cli_kit
+python -m ai_cli_kit.codex
+python -m ai_cli_kit.claude
 ```
 
 ### 进 TUI 后
 
-无参运行 `./aik` → 用 ↑↓ 选 **Codex Session Toolkit** 或 **CC Clean** → Enter 进入对应工具的菜单。
-
-也可以跳过菜单直接进子工具：
-
-```bash
-./codex-session-toolkit            # Codex 子工具的 TUI
-./cc-clean                         # CC Clean 的 TUI
-```
+无参运行 `./aik`（或 `python -m ai_cli_kit`）→ 用 ↑↓ 选 **Codex Session Toolkit** 或 **CC Clean** → Enter 进入对应工具的菜单。
 
 ## 常用命令
 
@@ -70,24 +94,6 @@ chmod +x install.sh aik cc-clean codex-session-toolkit codex-session-toolkit.com
 兼容写法：`./aik claude` 等价于 `./cc-clean`。
 
 **安全机制**：所有删除默认走 `~/.claude-clean-backups/<时间戳>/` 备份目录，可随时恢复。`--no-backup` 显式关闭备份；`--dry-run` 只预览不动磁盘。
-
-## 源码模式（开发 / 不安装直接跑）
-
-仓库自带 launcher，git 工作树下不需要 `pip install`：
-
-```bash
-./aik --help
-./codex-session-toolkit --help
-./cc-clean --help
-```
-
-或用 `python -m`：
-
-```bash
-python -m ai_cli_kit              # 顶层菜单
-python -m ai_cli_kit.codex        # Codex 子工具
-python -m ai_cli_kit.claude       # Claude 子工具
-```
 
 ## 制作发布包
 

@@ -7,15 +7,20 @@ APP_NAME="aik"
 VENV_DIR="${VENV_DIR:-$PROJECT_ROOT/.venv}"
 EDITABLE=0
 FORCE=0
+NO_SCRIPTS=0
 PYTHON_BIN="${PYTHON_BIN:-}"
 
 usage() {
   cat <<'EOF'
-Usage: ./install.sh [--editable] [--force] [--python <python-bin>]
+Usage: ./install.sh [--editable] [--force] [--no-scripts] [--python <python-bin>]
 
 Options:
   --editable         Install in editable mode for local development
   --force            Recreate the local .venv before installing
+  --no-scripts       Install the package but don't keep aik / cst /
+                     codex-session-toolkit / cc-clean console scripts in
+                     <venv>/bin (use ``python -m ai_cli_kit`` instead).
+                     Useful if you don't want extra commands on PATH.
   --python <bin>     Use a specific Python executable
   --help             Show this help text
 EOF
@@ -29,6 +34,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --force)
       FORCE=1
+      shift
+      ;;
+    --no-scripts)
+      NO_SCRIPTS=1
       shift
       ;;
     --python)
@@ -104,6 +113,16 @@ else
   "$VENV_PYTHON" -m pip install --no-deps "$PROJECT_ROOT"
 fi
 
+# --no-scripts: caller asked for a clean install with no PATH-visible commands.
+# We can't tell pip to skip individual entry points cleanly, so we install
+# normally and then unlink the four console scripts pip just dropped into
+# venv/bin. The package is still importable via ``python -m ai_cli_kit``.
+if [ "$NO_SCRIPTS" -eq 1 ]; then
+  for script in aik cst codex-session-toolkit cc-clean; do
+    rm -f "$VENV_DIR/bin/$script"
+  done
+fi
+
 # chmod the launcher scripts that exist. ``release.sh`` only ships in the
 # git source tree (it's excluded from the user-facing release tarball) so
 # we skip it when missing rather than failing the install.
@@ -117,15 +136,26 @@ echo ""
 echo "============================================="
 echo " Install complete."
 echo "============================================="
-echo "推荐：在项目目录里直接运行 launcher（已自动可执行）"
-echo "  ./aik                # 顶层菜单（推荐入口，进 Codex / Claude 选一个）"
-echo "  ./codex-session-toolkit"
-echo "  ./cc-clean"
+if [ "$NO_SCRIPTS" -eq 1 ]; then
+  echo "已按 --no-scripts 模式安装，未在 venv/bin 注册任何命令。"
+  echo "推荐运行方式（任选一种，都不会污染系统 PATH）："
+  echo "  ./aik                                  # 项目内 launcher"
+  echo "  $VENV_PYTHON -m ai_cli_kit             # python -m 直跑"
+  echo "  source \"$VENV_DIR/bin/activate\" && python -m ai_cli_kit"
+else
+  echo "推荐：在项目目录里直接运行 launcher（已自动可执行）"
+  echo "  ./aik                                  # 顶层菜单（进 Codex / Claude）"
+  echo "  ./codex-session-toolkit"
+  echo "  ./cc-clean"
+  echo ""
+  echo "也可以直接用 python，无需注册 PATH 命令："
+  echo "  $VENV_PYTHON -m ai_cli_kit             # 等价于 ./aik"
+  echo "  $VENV_PYTHON -m ai_cli_kit.codex"
+  echo "  $VENV_PYTHON -m ai_cli_kit.claude"
+  echo ""
+  echo "若想全局裸命令 'aik'，把 venv bin 加入 PATH 或 source venv："
+  echo "  export PATH=\"$VENV_DIR/bin:\$PATH\""
+  echo "  source \"$VENV_DIR/bin/activate\""
+fi
 echo ""
-echo "如需在任意目录用裸命令 'aik' 启动，把 venv bin 加入 PATH："
-echo "  export PATH=\"$VENV_DIR/bin:\$PATH\""
-echo "或者 source venv："
-echo "  source \"$VENV_DIR/bin/activate\""
-echo ""
-echo "查看版本："
-echo "  ./aik --version"
+echo "查看版本：./aik --version"

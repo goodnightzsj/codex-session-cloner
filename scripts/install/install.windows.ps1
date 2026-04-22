@@ -1,6 +1,7 @@
 param(
     [switch] $Editable,
     [switch] $Force,
+    [switch] $NoScripts,
     [Alias("h")]
     [switch] $Help,
     [string] $Python
@@ -13,11 +14,15 @@ $venvDir = if ($env:VENV_DIR) { $env:VENV_DIR } else { Join-Path $projectRoot ".
 
 function Show-Usage {
     @"
-Usage: .\install.ps1 [-Editable] [-Force] [-Python <python-bin>]
+Usage: .\install.ps1 [-Editable] [-Force] [-NoScripts] [-Python <python-bin>]
 
 Options:
   -Editable        Install in editable mode for local development
   -Force           Recreate the local .venv before installing
+  -NoScripts       Install the package but don't keep aik / cst /
+                   codex-session-toolkit / cc-clean console scripts in
+                   <venv>\Scripts (use ``python -m ai_cli_kit`` instead).
+                   Useful if you don't want extra commands on PATH.
   -Python <bin>    Use a specific Python executable
 "@
 }
@@ -100,17 +105,43 @@ if ($Editable) {
 }
 Assert-LastExitCode "pip install"
 
+# -NoScripts: caller wants a clean install with no PATH-visible commands.
+# pip can't be told to skip individual entry points cleanly, so we install
+# normally then remove the four console scripts from venv\Scripts. The
+# package is still importable via ``python -m ai_cli_kit``.
+if ($NoScripts) {
+    foreach ($name in @("aik", "cst", "codex-session-toolkit", "cc-clean")) {
+        foreach ($ext in @(".exe", ".cmd", "-script.py", "")) {
+            $candidate = Join-Path $venvDir "Scripts\$name$ext"
+            if (Test-Path $candidate) {
+                Remove-Item -Force $candidate
+            }
+        }
+    }
+}
+
 Write-Host ""
 Write-Host "=============================================" -ForegroundColor Green
 Write-Host " Install complete." -ForegroundColor Green
 Write-Host "=============================================" -ForegroundColor Green
-Write-Host "推荐：在项目目录里直接运行 launcher"
-Write-Host "  .\aik.cmd                # 顶层菜单（推荐入口，进 Codex / Claude 选一个）"
-Write-Host "  .\codex-session-toolkit.cmd"
-Write-Host "  .\cc-clean.cmd"
+if ($NoScripts) {
+    Write-Host "已按 -NoScripts 模式安装，未在 venv\Scripts 注册任何命令。"
+    Write-Host "推荐运行方式（任选一种，都不会污染系统 PATH）："
+    Write-Host "  .\aik.cmd                              # 项目内 launcher"
+    Write-Host "  $venvPython -m ai_cli_kit              # python -m 直跑"
+} else {
+    Write-Host "推荐：在项目目录里直接运行 launcher"
+    Write-Host "  .\aik.cmd                              # 顶层菜单（进 Codex / Claude）"
+    Write-Host "  .\codex-session-toolkit.cmd"
+    Write-Host "  .\cc-clean.cmd"
+    Write-Host ""
+    Write-Host "也可以直接用 python，无需注册 PATH 命令："
+    Write-Host "  $venvPython -m ai_cli_kit              # 等价于 .\aik.cmd"
+    Write-Host "  $venvPython -m ai_cli_kit.codex"
+    Write-Host "  $venvPython -m ai_cli_kit.claude"
+    Write-Host ""
+    Write-Host "若想全局裸命令 'aik'，把 venv Scripts 加入 PATH："
+    Write-Host "  `$env:Path = `"$venvDir\Scripts;`" + `$env:Path"
+}
 Write-Host ""
-Write-Host "如需在任意目录用裸命令 ``aik`` 启动，把 venv Scripts 加入 PATH："
-Write-Host "  `$env:Path = `"$venvDir\Scripts;`" + `$env:Path"
-Write-Host ""
-Write-Host "查看版本："
-Write-Host "  .\aik.cmd --version"
+Write-Host "查看版本：.\aik.cmd --version"
