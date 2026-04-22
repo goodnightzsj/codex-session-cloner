@@ -210,8 +210,17 @@ def _render_hub(selected: int) -> None:
     # Pixel-art banner — uses the same wordmark composer as codex/claude so
     # all three TUIs feel like one product. The banner adapts to terminal
     # width: full "AI CLI KIT" when room exists, tighter "AIK" otherwise.
-    for line in _aik_logo_lines(cols):
-        sys.stdout.write(_centered(line, cols) + "\n")
+    #
+    # Center the WHOLE block by the longest row's width, NOT each row by
+    # its own width. Per-row centering caused a visible stagger where
+    # shorter rows drifted right relative to longer ones, making the
+    # logo unreadable as a single wordmark.
+    logo_lines = _aik_logo_lines(cols)
+    block_width = max((display_width(line) for line in logo_lines), default=0)
+    block_pad = max(0, (cols - block_width) // 2)
+    block_indent = " " * block_pad
+    for line in logo_lines:
+        sys.stdout.write(block_indent + line + "\n")
     sys.stdout.write("\n")
     sys.stdout.write(_centered(
         style_text(f"{APP_DISPLAY_NAME} v{__version__}  ·  统一 AI CLI 工具箱", Ansi.DIM),
@@ -266,32 +275,41 @@ def _centered(text: str, cols: int) -> str:
 def _aik_logo_lines(cols: int) -> tuple:
     """Return the AI CLI KIT pixel-art logo sized to ``cols``.
 
-    Tries the full "AI CLI KIT" wordmark first; falls back to compact "AIK"
-    when the terminal is too narrow. Output is cached per (cols, color, ascii)
-    so the hub redraws don't re-rasterise on every keystroke.
+    Three deliberate choices for hub readability:
+
+    * ``word_gap=4`` — wide visual gutter so users see *three* words
+      "AI · CLI · KIT" instead of one continuous blob.
+    * ``shadow_ok=False`` — no diagonal shadow row. The shadow row sits
+      one column right of the letters (because shadows extend down-right),
+      which made the bottom of the banner look misaligned. Plain letters
+      without shadow stack cleanly.
+    * Falls back to compact "AIK" when even the tighter "AI CLI KIT" can't
+      fit the terminal width.
+
+    Output is cached per (cols, color, ascii) so hub redraws don't
+    re-rasterise on every keystroke.
     """
     ascii_ui = bool(env_first(*ASCII_UI_ENV_NAMES)) or not _can_encode("█")
     fill = "#" if ascii_ui else "█"
-    shadow = "." if ascii_ui else ("░" if _can_encode("░") else " ")
 
     max_width = max(20, cols - 4)
     gradient = ("#00FFFF", "#0048FF") if COLOR_ENABLED else None
 
-    # Big banner first; if too wide for the terminal, retry with "AIK".
     for text, char_gap, word_gap in (
-        ("AI CLI KIT", 1, 2),
-        ("AI CLI KIT", 0, 1),
+        ("AI CLI KIT", 1, 4),
+        ("AI CLI KIT", 1, 3),
+        ("AI CLI KIT", 0, 2),
         ("AIK", 1, 0),
     ):
         rendered = render_wordmark(
             text,
             font=LOGO_FONT_BANNER,
             fill=fill,
-            shadow=shadow,
+            shadow=" ",
             max_width=max_width,
             char_gap=char_gap,
             word_gap=word_gap,
-            shadow_ok=True,
+            shadow_ok=False,
             gradient=gradient,
         )
         if max((display_width(line) for line in rendered), default=0) <= max_width:
