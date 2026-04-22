@@ -254,6 +254,56 @@ class CodexSubflowCenteringTests(unittest.TestCase):
     against the centred header above.
     """
 
+    def test_run_centered_block_pads_uniformly(self) -> None:
+        """``_run_centered`` must indent all runner-output lines by the SAME
+        amount so tabular columns (validate-bundles, list-sessions, …) stay
+        aligned. Per-line independent centring would shred them.
+        """
+        if str(SRC_DIR) not in sys.path:
+            sys.path.insert(0, str(SRC_DIR))
+        import io
+        import re
+
+        from ai_cli_kit.codex.tui import app as codex_app
+        from ai_cli_kit.codex.tui.app import ToolkitAppContext, ToolkitTuiApp
+
+        # Pin terminal width so the indent math is deterministic.
+        original_term_width = codex_app.term_width
+        codex_app.term_width = lambda fallback=90: 100
+
+        ctx = ToolkitAppContext(
+            target_provider="demo",
+            active_sessions_dir="/tmp",
+            config_path="/tmp/x.toml",
+        )
+        app = ToolkitTuiApp(ctx)
+
+        def runner() -> int:
+            print("Bundle source filter: all")
+            print("Bundle directories scanned: 12")
+            print("Valid bundles: 12")
+            print("Invalid bundles: 0")
+            return 0
+
+        buf = io.StringIO()
+        original_stdout = sys.stdout
+        sys.stdout = buf
+        try:
+            app._run_centered(runner)
+        finally:
+            sys.stdout = original_stdout
+            codex_app.term_width = original_term_width
+
+        plain = re.sub(r"\x1b\[[0-9;]*m", "", buf.getvalue())
+        content_lines = [ln for ln in plain.split("\n") if ln.strip()]
+        self.assertEqual(len(content_lines), 4)
+        # Every non-blank line must share the same leading-space indent —
+        # that's the "block-centred" property that keeps columns aligned.
+        indents = {len(ln) - len(ln.lstrip(" ")) for ln in content_lines}
+        self.assertEqual(len(indents), 1, f"non-uniform indent: {indents}")
+        single_indent = next(iter(indents))
+        self.assertGreater(single_indent, 0, "runner output not indented at all")
+
     def test_no_bare_print_line_after_render_box(self) -> None:
         path = ROOT_DIR / "src" / "ai_cli_kit" / "codex" / "tui" / "app.py"
         text = path.read_text(encoding="utf-8")

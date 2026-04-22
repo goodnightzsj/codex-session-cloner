@@ -35,6 +35,7 @@ from .terminal import (
     align_line,
     app_logo_lines,
     clear_screen,
+    display_width,
     ellipsize_middle,
     glyphs,
     read_key,
@@ -330,11 +331,25 @@ class ToolkitTuiApp:
         Used in every modal fallback path that needs typed input (command
         prompts, DELETE confirmation, etc.) so that the cursor is visible
         only while the user is actively typing.
+
+        Centres the visible part of the prompt so it lines up with the
+        rest of the TUI. Leading newlines (commonly used to add a blank
+        line before the prompt) are emitted *before* the centring padding;
+        otherwise they would land in the middle of the indent and offset
+        only the part after the newline.
         """
         sys.stdout.write("\033[?25h")
         sys.stdout.flush()
         try:
-            return input(prompt)
+            screen_width, _, center = self._screen_layout()
+            display_prompt = prompt
+            leading_newlines = ""
+            while display_prompt.startswith("\n"):
+                leading_newlines += "\n"
+                display_prompt = display_prompt[1:]
+            if leading_newlines:
+                sys.stdout.write(leading_newlines)
+            return input(align_line(display_prompt, screen_width, center=center))
         finally:
             sys.stdout.write("\033[?25l")
             sys.stdout.flush()
@@ -355,6 +370,49 @@ class ToolkitTuiApp:
         """Print a one-liner (hint / footer) horizontally centred."""
         screen_width, _, center = self._screen_layout()
         print(align_line(text, screen_width, center=center))
+
+    def _run_centered(self, runner: Callable[[], int]) -> int:
+        """Run ``runner`` capturing stdout, then re-emit it block-centred.
+
+        The CLI subcommands invoked through ``runner`` (validate-bundles,
+        clone-provider, repair-desktop, …) print plain ``print()`` output —
+        bare line-prints that would land flush against the left margin while
+        every other TUI surface around them is centred. We capture the whole
+        block, find the longest line, and pad every line by the same amount
+        so tabular columns stay aligned (per-line centring would shred them).
+
+        Trade-off: streaming feedback is buffered until the runner finishes.
+        For long batch ops this means progress lines appear all at once at
+        the end. Acceptable: the alternative (per-line centring) breaks
+        column alignment in session lists / validation reports / etc.
+        """
+        import io
+
+        screen_width, _, center = self._screen_layout()
+        if not center:
+            return int(runner() or 0)
+
+        buf = io.StringIO()
+        original = sys.stdout
+        sys.stdout = buf
+        try:
+            result = runner()
+        finally:
+            sys.stdout = original
+
+        output = buf.getvalue()
+        if output:
+            lines = output.split("\n")
+            max_w = max((display_width(line) for line in lines), default=0)
+            pad = max(0, (screen_width - max_w) // 2)
+            if pad > 0:
+                indent = " " * pad
+                # Don't pad blank lines — they'd just push trailing whitespace
+                # into the file. Padded only when the line has visible content.
+                output = "\n".join((indent + line) if line.strip() else line for line in lines)
+            sys.stdout.write(output)
+            sys.stdout.flush()
+        return int(result or 0)
 
     def _run_toolkit(self, cli_args: List[str]) -> int:
         try:
@@ -1549,7 +1607,12 @@ class ToolkitTuiApp:
         self._print_centered_box(render_box(info_lines, width=box_width, border_codes=(Ansi.DIM, Ansi.BLUE)))
         print("")
 
-        result = runner()
+        # Capture + block-centre the runner's print() output so tabular
+        # reports (validate-bundles / list-sessions / repair-desktop / ...)
+        # match the centred TUI surface around them. ``_run_centered``
+        # buffers stdout, finds the longest line, pads everything by the
+        # same amount so columns stay aligned.
+        result = self._run_centered(runner)
         if result != 0:
             self._print_centered_text(style_text(f"操作返回状态码：{result}", Ansi.BOLD, Ansi.YELLOW))
         self._await_input(style_text("\n按 Enter 返回菜单...", Ansi.DIM))
