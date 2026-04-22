@@ -19,12 +19,18 @@ import os
 import sys
 from typing import Optional, Sequence
 
+from functools import lru_cache
+
 from . import APP_COMMAND, APP_DISPLAY_NAME, __version__
 from .core.tui.terminal import (
+    ASCII_UI_ENV_NAMES,
     Ansi,
+    COLOR_ENABLED,
+    _can_encode,
     clear_screen,
     configure_text_streams,
     display_width,
+    env_first,
     glyphs,
     is_interactive_terminal,
     read_key,
@@ -32,6 +38,7 @@ from .core.tui.terminal import (
     style_text,
     term_width,
 )
+from .core.tui.wordmark import LOGO_FONT_BANNER, render_wordmark
 
 
 # Tool registry — pairs the public token (``codex`` / ``claude``) with the
@@ -131,9 +138,10 @@ def _print_top_help(stream=None) -> None:
 def _run_hub() -> int:
     """Two-card picker: arrow keys / number / Enter to launch a tool's own TUI.
 
-    Designed as the "front door" — minimal text, two big highlighted cards,
-    one-key entry. The user should immediately see two clearly-labelled
-    options and not need to read documentation to pick one.
+    Designed as the "front door" — pixel-art logo, two big highlighted cards,
+    one-key entry. After a sub-tool exits we return to the hub so the user
+    can pick another tool or quit cleanly with Esc / q. Only an explicit
+    Esc / q at the hub terminates the whole process.
     """
     selected = 0
     sys.stdout.write("\033[?1049h\033[?25l")  # alt screen + hide cursor
@@ -155,43 +163,60 @@ def _run_hub() -> int:
                 selected = (selected + 1) % len(_TOOLS)
                 continue
             if key == "ENTER":
-                sys.stdout.write("\033[?25h\033[?1049l")
-                sys.stdout.flush()
-                return _dispatch_to_tool(_TOOLS[selected][0], [])
+                _enter_tool(_TOOLS[selected][0])
+                last_signature = None  # force redraw of hub
+                continue
             if isinstance(key, str) and key.isdigit():
                 idx = int(key) - 1
                 if 0 <= idx < len(_TOOLS):
-                    sys.stdout.write("\033[?25h\033[?1049l")
-                    sys.stdout.flush()
-                    return _dispatch_to_tool(_TOOLS[idx][0], [])
+                    _enter_tool(_TOOLS[idx][0])
+                    last_signature = None
                 continue
-            key_lower = (key or "").lower()
-            if key_lower in {"q", "quit", "exit"} or key == "ESC":
+            # Esc, q, Q, "exit", "quit" — anything that means "I'm done with
+            # the whole toolbox" — exits the process.
+            key_lower = (key or "").lower() if isinstance(key, str) else ""
+            if key == "ESC" or key_lower in {"q", "quit", "exit"}:
                 return 0
     finally:
         sys.stdout.write("\033[?25h\033[?1049l")
         sys.stdout.flush()
 
 
+def _enter_tool(tool_token: str) -> None:
+    """Suspend hub UI, run the tool, then restore hub UI on return.
+
+    Each tool owns its own alt-screen + cursor lifecycle, so we hand the
+    terminal back to a "clean main screen + cursor visible" state before
+    invoking it, then re-enter alt screen + hide cursor for the hub.
+    """
+    sys.stdout.write("\033[?25h\033[?1049l")
+    sys.stdout.flush()
+    try:
+        _dispatch_to_tool(tool_token, [])
+    finally:
+        sys.stdout.write("\033[?1049h\033[?25l")
+        sys.stdout.flush()
+
+
 def _render_hub(selected: int) -> None:
     pointer = glyphs().get("pointer", ">")
     cols = term_width()
-    # Card width tries to feel "big and obvious" without overflowing narrow
-    # terminals. 72 cols is a Goldilocks default; we cap at 90 for ultrawide.
     card_width = max(40, min(cols - 4, 90))
 
     clear_screen()
     sys.stdout.write("\033[H")
-
-    # Banner — kept text-only (no pixel-art) so it renders identically on
-    # every terminal and doesn't dwarf the two cards which are the actual UI.
-    banner_text = "AI CLI KIT"
-    subtitle = f"{APP_DISPLAY_NAME} v{__version__}  ·  统一 AI CLI 工具箱"
-    banner = style_text(banner_text, Ansi.BOLD, Ansi.BRIGHT_CYAN)
-    hint = style_text(subtitle, Ansi.DIM)
     sys.stdout.write("\n")
-    sys.stdout.write(_centered(banner, cols) + "\n")
-    sys.stdout.write(_centered(hint, cols) + "\n")
+
+    # Pixel-art banner — uses the same wordmark composer as codex/claude so
+    # all three TUIs feel like one product. The banner adapts to terminal
+    # width: full "AI CLI KIT" when room exists, tighter "AIK" otherwise.
+    for line in _aik_logo_lines(cols):
+        sys.stdout.write(_centered(line, cols) + "\n")
+    sys.stdout.write("\n")
+    sys.stdout.write(_centered(
+        style_text(f"{APP_DISPLAY_NAME} v{__version__}  ·  统一 AI CLI 工具箱", Ansi.DIM),
+        cols,
+    ) + "\n")
     sys.stdout.write("\n")
 
     # Two big cards — selected one gets BRIGHT_CYAN+BOLD border + bright label,
@@ -215,18 +240,16 @@ def _render_hub(selected: int) -> None:
         ]
         rendered = render_box(card_lines, width=card_width, border_codes=border_codes)
 
-        # Inject a left-margin pointer on the middle line of the selected card
-        # so users see a clear "you are here" without having to track colour.
         prefix_active = style_text(pointer, Ansi.BOLD, Ansi.BRIGHT_CYAN) + " "
         prefix_idle = "  "
         for line_idx, line in enumerate(rendered):
-            indent = "  "  # left-align the cards to the terminal
+            indent = "  "
             marker = prefix_active if (is_selected and line_idx == 1) else prefix_idle
             sys.stdout.write(indent + marker + line + "\n")
         sys.stdout.write("\n")
 
     footer = style_text(
-        "  ↑↓ 选择    Enter / 数字键 进入    q 退出",
+        "  ↑↓ 选择    Enter / 数字键 进入    Esc / q 退出",
         Ansi.DIM,
     )
     sys.stdout.write(footer + "\n")
@@ -237,6 +260,43 @@ def _centered(text: str, cols: int) -> str:
     width = display_width(text)
     pad = max(0, (cols - width) // 2)
     return (" " * pad) + text
+
+
+@lru_cache(maxsize=8)
+def _aik_logo_lines(cols: int) -> tuple:
+    """Return the AI CLI KIT pixel-art logo sized to ``cols``.
+
+    Tries the full "AI CLI KIT" wordmark first; falls back to compact "AIK"
+    when the terminal is too narrow. Output is cached per (cols, color, ascii)
+    so the hub redraws don't re-rasterise on every keystroke.
+    """
+    ascii_ui = bool(env_first(*ASCII_UI_ENV_NAMES)) or not _can_encode("█")
+    fill = "#" if ascii_ui else "█"
+    shadow = "." if ascii_ui else ("░" if _can_encode("░") else " ")
+
+    max_width = max(20, cols - 4)
+    gradient = ("#00FFFF", "#0048FF") if COLOR_ENABLED else None
+
+    # Big banner first; if too wide for the terminal, retry with "AIK".
+    for text, char_gap, word_gap in (
+        ("AI CLI KIT", 1, 2),
+        ("AI CLI KIT", 0, 1),
+        ("AIK", 1, 0),
+    ):
+        rendered = render_wordmark(
+            text,
+            font=LOGO_FONT_BANNER,
+            fill=fill,
+            shadow=shadow,
+            max_width=max_width,
+            char_gap=char_gap,
+            word_gap=word_gap,
+            shadow_ok=True,
+            gradient=gradient,
+        )
+        if max((display_width(line) for line in rendered), default=0) <= max_width:
+            return tuple(rendered)
+    return tuple(rendered)
 
 
 if __name__ == "__main__":

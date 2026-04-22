@@ -1247,7 +1247,7 @@ class ToolkitTuiApp:
             "  功能页内部再选择具体动作执行。",
             "",
             style_text("TUI 快捷键：", Ansi.BOLD),
-            "  首页：↑/↓ 选择功能域，Enter 进入，q 退出",
+            "  首页：↑/↓ 选择功能域，Enter 进入，Esc / q 退出",
             "  功能页：↑/↓ 选择动作，Enter 执行，q / ← 返回首页",
             "  功能页：←/→ 或 PgUp/PgDn 切换上一个 / 下一个功能页",
             "  h                  打开帮助",
@@ -1345,7 +1345,7 @@ class ToolkitTuiApp:
         output_lines.append("")
 
         help_lines = [
-            "Enter 进入功能页  |  ↑/↓ 选择功能域  |  h 帮助  |  q 退出",
+            "Enter 进入功能页  |  ↑/↓ 选择功能域  |  h 帮助  |  Esc / q 退出",
         ]
         if os.name == "nt":
             help_lines.append(f"提示：先运行 .\\install.ps1，再用 .\\{self.context.entry_command}.cmd 启动")
@@ -1638,6 +1638,11 @@ class ToolkitTuiApp:
                         selected_section = (selected_section + 1) % len(self.menu_sections)
                     elif key == "ENTER":
                         current_view = "section"
+                    elif key == "ESC":
+                        # Exit Codex TUI cleanly. When invoked via ``aik``
+                        # the dispatcher catches this return and re-renders
+                        # the hub so the user can pick another tool.
+                        return 0
                     else:
                         key_str = str(key).strip().lower()
                         if key_str in {"q", "quit", "exit", "0"}:
