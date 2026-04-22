@@ -112,15 +112,25 @@ def replace_with_retry(src: str, dst: str, *, attempts: int = 5, base_delay: flo
     On POSIX a ``PermissionError`` from ``os.replace`` indicates a real
     permission/ownership problem — there is no transient AV-style holder — so
     we re-raise immediately rather than burn ~620 ms before failing visibly.
+
+    Both paths are wrapped with :func:`long_path` so callers passing a path
+    that exceeds Windows MAX_PATH (260 chars) — common when users install the
+    toolkit deep under ``%USERPROFILE%\\OneDrive\\…`` — get the ``\\\\?\\``
+    prefix that lets ``CreateFileW``-backed APIs (which include rename) cross
+    the legacy limit. ``long_path`` is a no-op on POSIX so behaviour is
+    unchanged there.
     """
+    src_long = long_path(src)
+    dst_long = long_path(dst)
+
     if os.name != "nt":
-        os.replace(src, dst)
+        os.replace(src_long, dst_long)
         return
 
     last_exc: Optional[BaseException] = None
     for attempt in range(attempts):
         try:
-            os.replace(src, dst)
+            os.replace(src_long, dst_long)
             return
         except PermissionError as exc:
             last_exc = exc

@@ -1470,16 +1470,28 @@ class ToolkitTuiApp:
             border_codes=(Ansi.DIM, Ansi.BLUE),
         )
 
-        hide_cursor = "\033[?25l"
-        home_cursor = "\033[H"
-        clear_to_eol = "\033[K"
-        clear_to_eos = "\033[J"
         visible_lines = self._fit_lines_to_screen(output_lines)
-        full_output = "\n".join(line + clear_to_eol for line in visible_lines) + "\n"
-        # Keep cursor hidden across frames (it is only re-shown by _await_input
-        # for typed prompts). Emitting show_cursor at end of each frame caused a
-        # 5Hz blink on the previous polling redraw loop.
-        sys.stdout.write(hide_cursor + home_cursor + full_output + clear_to_eos)
+        # Two redraw paths:
+        # * VT-capable (modern Win Terminal / iTerm2 / Linux / macOS): emit
+        #   incremental cursor codes (hide / home / clear-to-eol per line /
+        #   clear-to-eos at end) so frames overdraw without a visible flash.
+        # * Legacy Windows cmd.exe (no VT): the escapes would print as
+        #   literal garbage on every frame and obliterate readability.
+        #   Fall back to a full clear_screen() + plain reprint per frame —
+        #   slower / slight flicker but actually usable.
+        if _WINDOWS_VT_OK:
+            hide_cursor = "\033[?25l"
+            home_cursor = "\033[H"
+            clear_to_eol = "\033[K"
+            clear_to_eos = "\033[J"
+            full_output = "\n".join(line + clear_to_eol for line in visible_lines) + "\n"
+            # Keep cursor hidden across frames (it is only re-shown by _await_input
+            # for typed prompts). Emitting show_cursor at end of each frame caused a
+            # 5Hz blink on the previous polling redraw loop.
+            sys.stdout.write(hide_cursor + home_cursor + full_output + clear_to_eos)
+        else:
+            clear_screen()
+            sys.stdout.write("\n".join(visible_lines) + "\n")
         sys.stdout.flush()
 
     def _render_section_page(self, section_index: int, action_offset: int) -> None:
@@ -1564,13 +1576,21 @@ class ToolkitTuiApp:
             border_codes=(Ansi.DIM, Ansi.BLUE),
         )
 
-        hide_cursor = "\033[?25l"
-        home_cursor = "\033[H"
-        clear_to_eol = "\033[K"
-        clear_to_eos = "\033[J"
         visible_lines = self._fit_lines_to_screen(output_lines)
-        full_output = "\n".join(line + clear_to_eol for line in visible_lines) + "\n"
-        sys.stdout.write(hide_cursor + home_cursor + full_output + clear_to_eos)
+        # See ``_render_home`` for the dual-path explanation: VT-capable
+        # terminals get the incremental cursor-code overdraw; legacy Windows
+        # cmd.exe (no VT) gets a plain clear_screen + reprint so the frame
+        # is readable instead of "[?25l[H...[K[J" gibberish.
+        if _WINDOWS_VT_OK:
+            hide_cursor = "\033[?25l"
+            home_cursor = "\033[H"
+            clear_to_eol = "\033[K"
+            clear_to_eos = "\033[J"
+            full_output = "\n".join(line + clear_to_eol for line in visible_lines) + "\n"
+            sys.stdout.write(hide_cursor + home_cursor + full_output + clear_to_eos)
+        else:
+            clear_screen()
+            sys.stdout.write("\n".join(visible_lines) + "\n")
         sys.stdout.flush()
 
     def _execute_menu_action(self, chosen_action: TuiMenuAction) -> None:

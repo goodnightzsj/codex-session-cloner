@@ -31,6 +31,7 @@ from ..support import (
     classify_session_kind,
     detect_machine_key,
     detect_machine_label,
+    long_path,
     normalize_bundle_root,
     safe_copy2,
 )
@@ -63,7 +64,11 @@ def export_session(
         raise ToolkitError(f"Unexpected session path: {session_file}") from exc
 
     final_bundle_dir = bundle_root / session_id
-    stage_root = Path(tempfile.mkdtemp(prefix=".cst-exp-", dir=str(bundle_root)))
+    # long_path() prefixes \\\\?\\ on Windows when bundle_root is near MAX_PATH
+    # (260 chars) — without it, mkdtemp's CreateDirectoryW call would fail
+    # on deeply-nested OneDrive / corporate paths. Prefix propagates into
+    # mkdtemp's returned path so subsequent file ops also bypass MAX_PATH.
+    stage_root = Path(tempfile.mkdtemp(prefix=".cst-exp-", dir=long_path(bundle_root)))
     stage_bundle_dir = stage_root / session_id
     old_bundle_backup: Optional[Path] = None
 

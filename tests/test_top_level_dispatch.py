@@ -425,6 +425,50 @@ class CodexSubflowCenteringTests(unittest.TestCase):
         self.assertIn("_WINDOWS_VT_OK", text, "_WINDOWS_VT_OK guard missing from cli.py")
         self.assertIn("if _WINDOWS_VT_OK", text, "no conditional guard around VT sequences")
 
+    def test_codex_frame_render_fallback_when_vt_disabled(self) -> None:
+        """Frame redraw (5Hz hot path) MUST fall back to clear_screen +
+        plain reprint when VT is disabled. Otherwise legacy Windows cmd.exe
+        users see ``[?25l[H...[K[J`` literal garbage on every keystroke.
+
+        Static-scan check: ``_render_home`` and ``_render_section_page`` MUST
+        contain a branch that uses ``clear_screen()`` and ``"\\n".join(visible_lines)``
+        — proving the no-VT fallback exists.
+        """
+        path = ROOT_DIR / "src" / "ai_cli_kit" / "codex" / "tui" / "app.py"
+        text = path.read_text(encoding="utf-8")
+        # The dual-path comment marker should appear at least twice
+        # (one in each render method).
+        self.assertGreaterEqual(
+            text.count("if _WINDOWS_VT_OK:"),
+            2,
+            "frame renderers (_render_home / _render_section_page) missing "
+            "the if _WINDOWS_VT_OK: branch — legacy cmd.exe will see VT escape garbage",
+        )
+
+    def test_replace_with_retry_wraps_paths_with_long_path(self) -> None:
+        """``replace_with_retry`` MUST pre-wrap both src and dst with
+        ``long_path()`` before calling ``os.replace``. Without this, a tmp /
+        target path that exceeds Windows MAX_PATH (260 chars — common on
+        OneDrive-mirrored ``%USERPROFILE%`` trees) silently fails.
+        """
+        path = ROOT_DIR / "src" / "ai_cli_kit" / "core" / "support.py"
+        text = path.read_text(encoding="utf-8")
+        # The function body should reference long_path twice (src + dst) AND
+        # not call os.replace with the raw arguments.
+        import re
+
+        m = re.search(r"def replace_with_retry\([^)]*\).*?(?=\n\ndef |\Z)", text, re.DOTALL)
+        self.assertIsNotNone(m, "replace_with_retry definition not found")
+        body = m.group(0)
+        self.assertIn(
+            "long_path(src)", body,
+            "replace_with_retry doesn't wrap src with long_path — Windows MAX_PATH unsafe",
+        )
+        self.assertIn(
+            "long_path(dst)", body,
+            "replace_with_retry doesn't wrap dst with long_path — Windows MAX_PATH unsafe",
+        )
+
     def test_codex_cursor_toggles_guarded_by_windows_vt(self) -> None:
         """Regression guard: every ``\\033[?25l`` / ``\\033[?25h`` write in
         ``codex/tui/app.py`` MUST be inside an ``if _WINDOWS_VT_OK:`` block.
