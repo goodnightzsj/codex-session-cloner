@@ -385,20 +385,7 @@ def term_height(fallback: int = 24) -> int:
         return fallback
 
 
-def render_box(
-    lines,
-    width: Optional[int] = None,
-    border_codes: Optional[tuple] = None,
-    align: str = "left",
-) -> List[str]:
-    """Render a Unicode (or ASCII fallback) box around ``lines``.
-
-    ``align`` controls how each row sits inside the box's inner width:
-    * ``"left"`` (default) — pad-right, content sticks to the left edge.
-    * ``"center"`` — pad both sides so the content is centred horizontally
-      within the box. Used by hub-style boxes where the content is short
-      and centred reads as the obvious affordance.
-    """
+def render_box(lines, width: Optional[int] = None, border_codes: Optional[tuple] = None) -> List[str]:
     cols = term_width()
     if width is None:
         width = min(cols, 90)
@@ -411,15 +398,7 @@ def render_box(
 
     out = [style_text(top, *(border_codes or ()))]
     for line in lines:
-        clipped = ellipsize_middle(str(line), inner)
-        if align == "center":
-            content_width = display_width(clipped)
-            left_pad = max(0, (inner - content_width) // 2)
-            right_pad = max(0, inner - content_width - left_pad)
-            text = (" " * left_pad) + clipped + (" " * right_pad)
-        else:
-            text = pad_right(clipped, inner)
-
+        text = pad_right(ellipsize_middle(str(line), inner), inner)
         if border_codes:
             left = style_text(box["v"], *border_codes)
             right = style_text(box["v"], *border_codes)

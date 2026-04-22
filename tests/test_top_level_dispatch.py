@@ -244,3 +244,31 @@ class HubLogoTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CodexSubflowCenteringTests(unittest.TestCase):
+    """Regression guard: every codex/tui/app.py render_box render path must
+    go through ``_print_centered_box`` so sub-flows (browser, action panel,
+    detail view) stay centred. The legacy ``for line in render_box(...):
+    print(line)`` pattern bypasses centring and reads as "stuck left"
+    against the centred header above.
+    """
+
+    def test_no_bare_print_line_after_render_box(self) -> None:
+        path = ROOT_DIR / "src" / "ai_cli_kit" / "codex" / "tui" / "app.py"
+        text = path.read_text(encoding="utf-8")
+        # The single legitimate ``print(line)`` left in the file iterates
+        # ``_brand_header_lines`` which already applied align_line internally.
+        # Any new ``for line in render_box(...):`` followed by ``print(line)``
+        # would be a regression.
+        import re
+
+        bad = re.findall(
+            r"for[ \t]+line[ \t]+in[ \t]+render_box\([^)]*\):\s*\n[ \t]+print\(line\)",
+            text,
+        )
+        self.assertEqual(
+            bad, [],
+            f"Found {len(bad)} bare 'for line in render_box(...): print(line)' "
+            "pattern(s) — use self._print_centered_box(render_box(...)) instead."
+        )

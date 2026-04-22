@@ -127,57 +127,6 @@ class CoreTuiImportTests(unittest.TestCase):
             self.assertIsInstance(line, str)
 
 
-class RenderBoxAlignmentTests(unittest.TestCase):
-    """``render_box(align="center")`` must centre each row inside the box.
-
-    Regression guard: ``codex._append_box`` and several claude TUI boxes
-    rely on this contract to line up with the centred banner / hub. If the
-    parameter is silently dropped the layout reverts to left-aligned.
-    """
-
-    def test_left_align_default_pads_right_only(self) -> None:
-        from ai_cli_kit.core.tui.terminal import render_box, strip_ansi
-
-        rendered = render_box(["abc"], width=20)
-        body = strip_ansi(rendered[1])
-        inner = body[2:-2]
-        self.assertTrue(inner.startswith("abc"), f"expected left-align, got {inner!r}")
-
-    def test_center_align_pads_both_sides(self) -> None:
-        from ai_cli_kit.core.tui.terminal import render_box, strip_ansi
-
-        # render_box clamps width to >= 24, so passing 20 yields width=24,
-        # inner=20 cols. "abc" len=3 → left_pad=8, right_pad=9.
-        rendered = render_box(["abc"], width=20, align="center")
-        body = strip_ansi(rendered[1])
-        inner = body[2:-2]
-        self.assertEqual(inner, "        abc         ", f"expected centred padding, got {inner!r}")
-
-    def test_codex_append_box_defaults_to_center(self) -> None:
-        """``_append_box`` without explicit align centres — used by home /
-        section views to keep nav / info / help boxes visually aligned with
-        the centred banner above them."""
-        from ai_cli_kit.codex.tui.app import ToolkitAppContext, ToolkitTuiApp
-        from ai_cli_kit.core.tui.terminal import strip_ansi
-
-        ctx = ToolkitAppContext(
-            target_provider="x", active_sessions_dir="/tmp", config_path="/tmp/x"
-        )
-        app = ToolkitTuiApp(ctx)
-        out: list = []
-        app._append_box(
-            out,
-            ["abc"],
-            box_width=24,
-            screen_width=24,
-            center=False,
-            border_codes=(),
-        )
-        body = strip_ansi(out[1])
-        inner = body[2:-2]
-        self.assertFalse(inner.startswith("abc"), f"expected centred (default), got {inner!r}")
-
-
 class CoreScreenModeTests(unittest.TestCase):
     def test_resolve_returns_main_when_stdout_is_not_tty(self) -> None:
         from ai_cli_kit.core.tui.screen_mode import (

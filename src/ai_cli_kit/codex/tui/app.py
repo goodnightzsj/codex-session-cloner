@@ -280,15 +280,8 @@ class ToolkitTuiApp:
         screen_width: int,
         center: bool,
         border_codes: Tuple[str, ...],
-        align: str = "center",
     ) -> None:
-        """Append a box; ``align`` controls inner content alignment.
-
-        Default is ``"center"`` so menu / nav / info boxes look aligned with
-        the centred banner above. Pass ``align="left"`` for tabular content
-        like session lists where centring each row would be unreadable.
-        """
-        for line in render_box(lines, width=box_width, border_codes=border_codes, align=align):
+        for line in render_box(lines, width=box_width, border_codes=border_codes):
             output_lines.append(align_line(line, screen_width, center=center))
 
     def _action_badge(self, menu_action: TuiMenuAction) -> str:
@@ -346,11 +339,28 @@ class ToolkitTuiApp:
             sys.stdout.write("\033[?25l")
             sys.stdout.flush()
 
+    def _print_centered_box(self, box_lines) -> None:
+        """Print a ``render_box(...)`` output with each line centred.
+
+        Hub-style centring (block padding, not per-line) — every line of the
+        box gets the same left padding so borders stack vertically. Use this
+        instead of bare ``print(line)`` for any framed content so detail /
+        list / action panels match the centred home/section views above.
+        """
+        screen_width, _, center = self._screen_layout()
+        for line in box_lines:
+            print(align_line(line, screen_width, center=center))
+
+    def _print_centered_text(self, text: str) -> None:
+        """Print a one-liner (hint / footer) horizontally centred."""
+        screen_width, _, center = self._screen_layout()
+        print(align_line(text, screen_width, center=center))
+
     def _run_toolkit(self, cli_args: List[str]) -> int:
         try:
             return int(run_toolkit_cli(cli_args))
         except ToolkitError as exc:
-            print(style_text(str(exc), Ansi.RED))
+            self._print_centered_text(style_text(str(exc), Ansi.RED))
             return 1
 
     def _action_color(self, menu_action: TuiMenuAction) -> str:
@@ -542,10 +552,7 @@ class ToolkitTuiApp:
         allow_empty: bool = True,
     ) -> Optional[str]:
         box_width = self._print_branded_header(title)
-        # Help / hint boxes use centered content so they line up with the
-        # centred branded header above.
-        for line in render_box(help_lines, width=box_width, border_codes=(Ansi.DIM, Ansi.BLUE), align="center"):
-            print(line)
+        self._print_centered_box(render_box(help_lines, width=box_width, border_codes=(Ansi.DIM, Ansi.BLUE)))
         print("")
 
         suffix = f"（默认：{default}）" if default else ""
@@ -588,8 +595,7 @@ class ToolkitTuiApp:
         border_codes: Optional[Tuple[str, ...]] = None,
     ) -> None:
         box_width = self._print_branded_header(title)
-        for line in render_box(lines, width=box_width, border_codes=border_codes or (Ansi.DIM, Ansi.BLUE)):
-            print(line)
+        self._print_centered_box(render_box(lines, width=box_width, border_codes=border_codes or (Ansi.DIM, Ansi.BLUE)))
         print("")
         self._await_input(style_text("按 Enter 返回...", Ansi.DIM))
 
@@ -603,8 +609,7 @@ class ToolkitTuiApp:
 
         while True:
             box_width = self._print_branded_header("会话详情 / 导出")
-            for line in render_box(self._session_detail_lines(summary), width=box_width, border_codes=(Ansi.DIM, Ansi.BLUE)):
-                print(line)
+            self._print_centered_box(render_box(self._session_detail_lines(summary), width=box_width, border_codes=(Ansi.DIM, Ansi.BLUE)))
             print("")
 
             action_lines: List[str] = []
@@ -614,10 +619,9 @@ class ToolkitTuiApp:
                     action_lines.append(style_text(f"{pointer} {label}", Ansi.BOLD, Ansi.UNDERLINE, action["color"]))
                 else:
                     action_lines.append("  " + style_text(f"[{action['key']}]", Ansi.BOLD, action["color"]) + f" {action['label']}")
-            for line in render_box(action_lines, width=box_width, border_codes=(Ansi.DIM, Ansi.MAGENTA)):
-                print(line)
+            self._print_centered_box(render_box(action_lines, width=box_width, border_codes=(Ansi.DIM, Ansi.MAGENTA)))
             print("")
-            print(style_text("按键：↑/↓ 选择 · Enter 执行 · e 快捷 · q 返回", Ansi.DIM))
+            self._print_centered_text(style_text("按键：↑/↓ 选择 · Enter 执行 · e 快捷 · q 返回", Ansi.DIM))
 
             key = read_key()
             if key is None:
@@ -655,8 +659,7 @@ class ToolkitTuiApp:
 
         while True:
             box_width = self._print_branded_header("Bundle 详情 / 导入")
-            for line in render_box(self._bundle_detail_lines(bundle), width=box_width, border_codes=(Ansi.DIM, Ansi.GREEN)):
-                print(line)
+            self._print_centered_box(render_box(self._bundle_detail_lines(bundle), width=box_width, border_codes=(Ansi.DIM, Ansi.GREEN)))
             print("")
 
             action_lines: List[str] = []
@@ -666,10 +669,9 @@ class ToolkitTuiApp:
                     action_lines.append(style_text(f"{pointer} {label}", Ansi.BOLD, Ansi.UNDERLINE, action["color"]))
                 else:
                     action_lines.append("  " + style_text(f"[{action['key']}]", Ansi.BOLD, action["color"]) + f" {action['label']}")
-            for line in render_box(action_lines, width=box_width, border_codes=(Ansi.DIM, Ansi.MAGENTA)):
-                print(line)
+            self._print_centered_box(render_box(action_lines, width=box_width, border_codes=(Ansi.DIM, Ansi.MAGENTA)))
             print("")
-            print(style_text("按键：↑/↓ 选择 · Enter 执行 · i/v 快捷 · q 返回", Ansi.DIM))
+            self._print_centered_text(style_text("按键：↑/↓ 选择 · Enter 执行 · i/v 快捷 · q 返回", Ansi.DIM))
 
             key = read_key()
             if key is None:
@@ -732,8 +734,7 @@ class ToolkitTuiApp:
                 f"{style_text('匹配数量', Ansi.DIM)} : {len(entries)}",
                 f"{style_text('模式', Ansi.DIM)}   : {'浏览 / 直接操作' if mode == 'view' else '选择后导出'}",
             ]
-            for line in render_box(info_lines, width=box_width, border_codes=(Ansi.DIM, Ansi.BLUE)):
-                print(line)
+            self._print_centered_box(render_box(info_lines, width=box_width, border_codes=(Ansi.DIM, Ansi.BLUE)))
             print("")
 
             list_lines: List[str] = []
@@ -767,8 +768,7 @@ class ToolkitTuiApp:
                             )
                     else:
                         list_lines.append(line)
-            for line in render_box(list_lines, width=box_width, border_codes=(Ansi.DIM, Ansi.MAGENTA)):
-                print(line)
+            self._print_centered_box(render_box(list_lines, width=box_width, border_codes=(Ansi.DIM, Ansi.MAGENTA)))
 
             key = read_key()
             if key is None:
@@ -866,8 +866,7 @@ class ToolkitTuiApp:
                 f"{style_text('导出机器', Ansi.DIM)} : {snapshot.current_machine_label}",
                 f"{style_text('历史视图', Ansi.DIM)} : {'每台机器每个会话仅显示最新一份 Bundle' if latest_only else '显示全部历史 Bundle'}",
             ]
-            for line in render_box(info_lines, width=box_width, border_codes=(Ansi.DIM, Ansi.BLUE)):
-                print(line)
+            self._print_centered_box(render_box(info_lines, width=box_width, border_codes=(Ansi.DIM, Ansi.BLUE)))
             print("")
 
             list_lines: List[str] = []
@@ -893,8 +892,7 @@ class ToolkitTuiApp:
                         list_lines.append("  " + style_text(ellipsize_middle(detail_line, max(10, box_width - 10)), Ansi.DIM))
                     else:
                         list_lines.append(line)
-            for line in render_box(list_lines, width=box_width, border_codes=(Ansi.DIM, Ansi.GREEN)):
-                print(line)
+            self._print_centered_box(render_box(list_lines, width=box_width, border_codes=(Ansi.DIM, Ansi.GREEN)))
 
             key = read_key()
             if key is None:
@@ -1008,8 +1006,7 @@ class ToolkitTuiApp:
                 f"{style_text('设备数量', Ansi.DIM)}   : {len(machine_options)}",
                 f"{style_text('下一步', Ansi.DIM)}   : 进入设备后选择 desktop / active / cli / single",
             ]
-            for line in render_box(info_lines, width=box_width, border_codes=(Ansi.DIM, Ansi.BLUE)):
-                print(line)
+            self._print_centered_box(render_box(info_lines, width=box_width, border_codes=(Ansi.DIM, Ansi.BLUE)))
             print("")
 
             machine_lines: List[str] = []
@@ -1030,8 +1027,7 @@ class ToolkitTuiApp:
                         machine_lines.append(style_text(line, Ansi.BOLD, Ansi.CYAN))
                     else:
                         machine_lines.append(line)
-            for line in render_box(machine_lines, width=box_width, border_codes=(Ansi.DIM, Ansi.GREEN)):
-                print(line)
+            self._print_centered_box(render_box(machine_lines, width=box_width, border_codes=(Ansi.DIM, Ansi.GREEN)))
 
             key = read_key()
             if key is None:
@@ -1084,8 +1080,7 @@ class ToolkitTuiApp:
                     f"{style_text('分类数量', Ansi.DIM)} : {len(category_options)}",
                     f"{style_text('导入方式', Ansi.DIM)} : 选中一个分类文件夹后，导入该文件夹下全部 Bundle",
                 ]
-                for line in render_box(info_lines, width=box_width, border_codes=(Ansi.DIM, Ansi.BLUE)):
-                    print(line)
+                self._print_centered_box(render_box(info_lines, width=box_width, border_codes=(Ansi.DIM, Ansi.BLUE)))
                 print("")
 
                 category_lines: List[str] = []
@@ -1105,8 +1100,7 @@ class ToolkitTuiApp:
                             category_lines.append(style_text(line, Ansi.BOLD, Ansi.CYAN))
                         else:
                             category_lines.append(line)
-                for line in render_box(category_lines, width=box_width, border_codes=(Ansi.DIM, Ansi.GREEN)):
-                    print(line)
+                self._print_centered_box(render_box(category_lines, width=box_width, border_codes=(Ansi.DIM, Ansi.GREEN)))
 
                 key = read_key()
                 if key is None:
@@ -1277,8 +1271,7 @@ class ToolkitTuiApp:
             "  l                  在 Bundle 列表切换“全部历史 / 仅最新”",
             "  i / v              在 Bundle 列表直接导入为会话 / 导入为会话并自动建目录",
         ]
-        for line in render_box(lines, width=box_width, border_codes=(Ansi.DIM,)):
-            print(line)
+        self._print_centered_box(render_box(lines, width=box_width, border_codes=(Ansi.DIM,)))
         print("")
         self._await_input("按 Enter 返回菜单...")
 
@@ -1540,7 +1533,7 @@ class ToolkitTuiApp:
     ) -> None:
         box_width = self._print_branded_header("执行中…")
         color = Ansi.RED if danger and not dry_run else Ansi.YELLOW if dry_run else Ansi.CYAN
-        print(style_text(f"▶ {action_name}", Ansi.BOLD, color))
+        self._print_centered_text(style_text(f"▶ {action_name}", Ansi.BOLD, color))
         print("")
 
         info_lines = [
@@ -1553,13 +1546,12 @@ class ToolkitTuiApp:
             info_lines.append(style_text(f"{glyphs().get('danger', '!!')} 【危险】", Ansi.BOLD, Ansi.RED) + " 将删除文件，无法恢复。")
         elif dry_run:
             info_lines.append(style_text(f"{glyphs().get('warn', '!')} 【DRY-RUN】", Ansi.BOLD, Ansi.YELLOW) + " 不写入/不删除。")
-        for line in render_box(info_lines, width=box_width, border_codes=(Ansi.DIM, Ansi.BLUE)):
-            print(line)
+        self._print_centered_box(render_box(info_lines, width=box_width, border_codes=(Ansi.DIM, Ansi.BLUE)))
         print("")
 
         result = runner()
         if result != 0:
-            print(style_text(f"\n操作返回状态码：{result}", Ansi.BOLD, Ansi.YELLOW))
+            self._print_centered_text(style_text(f"操作返回状态码：{result}", Ansi.BOLD, Ansi.YELLOW))
         self._await_input(style_text("\n按 Enter 返回菜单...", Ansi.DIM))
 
     def _confirm_dangerous_action(self, cli_args: Sequence[str]) -> bool:
@@ -1572,8 +1564,7 @@ class ToolkitTuiApp:
             "确认方式：输入 DELETE 并回车。",
             "取消方式：直接回车。",
         ]
-        for line in render_box(info_lines, width=box_width, border_codes=(Ansi.DIM, Ansi.RED)):
-            print(line)
+        self._print_centered_box(render_box(info_lines, width=box_width, border_codes=(Ansi.DIM, Ansi.RED)))
         print("")
         return self._await_input(style_text("请输入 DELETE 确认执行：", Ansi.BOLD, Ansi.RED)).strip() == "DELETE"
 
