@@ -1,7 +1,50 @@
-.github export-ignore
-tests export-ignore
-scripts/compat export-ignore
-scripts/release export-ignore
-Makefile export-ignore
-release.sh export-ignore
-.gitignore export-ignore
+# --- Line ending normalisation ---------------------------------------------
+# Without this block, Windows users with the default ``core.autocrlf=true``
+# end up with CRLF in shell scripts on clone — and Git Bash / WSL / macOS /
+# Linux then choke on the shebang with errors like
+#   ``bash: ./aik: /usr/bin/env\r: bad interpreter: No such file or directory``
+# We pin POSIX scripts to LF and Windows scripts to CRLF so each platform's
+# native interpreter sees what it expects regardless of the clone host.
+
+* text=auto
+
+# POSIX shell launchers + macOS .command files MUST keep LF. They have
+# shebangs (`#!/usr/bin/env sh`) and `set -eu` lines that fail on CRLF.
+*.sh         text eol=lf
+*.command    text eol=lf
+aik          text eol=lf
+cc-clean     text eol=lf
+codex-session-toolkit text eol=lf
+
+# Windows wrappers: cmd.exe and powershell handle either, but pinning to
+# CRLF avoids confusing diff churn for Windows users editing locally.
+*.cmd        text eol=crlf
+*.bat        text eol=crlf
+*.ps1        text eol=crlf
+
+# Python source — LF everywhere for predictable cross-platform diffs.
+*.py         text eol=lf
+*.toml       text eol=lf
+*.md         text eol=lf
+*.yml        text eol=lf
+*.yaml       text eol=lf
+*.txt        text eol=lf
+Makefile     text eol=lf
+
+# Binary assets — never touch.
+*.png        binary
+*.jpg        binary
+*.jpeg       binary
+*.gif        binary
+*.zip        binary
+*.tar.gz     binary
+
+# --- Release archive exclusions (kept from original) -----------------------
+.github           export-ignore
+tests             export-ignore
+scripts/compat    export-ignore
+scripts/release   export-ignore
+Makefile          export-ignore
+release.sh        export-ignore
+.gitignore        export-ignore
+.gitattributes    export-ignore
