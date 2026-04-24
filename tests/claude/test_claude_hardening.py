@@ -216,6 +216,47 @@ class RelativeUnderHomeCaseTests(unittest.TestCase):
             self.assertFalse(str(relative).startswith("external"))
 
 
+class PathSizeCacheTests(unittest.TestCase):
+    """``_path_size`` must memoise directory walks so the Claude TUI's
+    per-keypress plan rebuild doesn't re-scan ``projects_dir`` every time.
+    The cache key is (path, st_mtime_ns) so external file-system mutations
+    that bump mtime (git pulls, editors, backups) still invalidate it.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name) / "data"
+        self.dir.mkdir()
+        # Clear any pre-existing cache entries from other tests.
+        from ai_cli_kit.claude.services import _PATH_SIZE_CACHE
+        _PATH_SIZE_CACHE.clear()
+
+    def test_second_call_hits_cache_when_mtime_unchanged(self) -> None:
+        from ai_cli_kit.claude.services import _PATH_SIZE_CACHE, _path_size
+
+        (self.dir / "a.txt").write_text("hello", encoding="utf-8")
+        first = _path_size(self.dir)
+        self.assertEqual(first, 5)
+        # A second call must not re-enumerate; the cache dict should have the entry.
+        cache_size_before = len(_PATH_SIZE_CACHE)
+        second = _path_size(self.dir)
+        self.assertEqual(second, 5)
+        self.assertEqual(len(_PATH_SIZE_CACHE), cache_size_before,
+                         "second call added a new cache entry — cache miss when it should hit")
+
+    def test_cache_invalidates_on_mtime_change(self) -> None:
+        from ai_cli_kit.claude.services import _path_size
+
+        (self.dir / "a.txt").write_text("hello", encoding="utf-8")
+        self.assertEqual(_path_size(self.dir), 5)
+        # Touch dir mtime by adding a new file; verify cache invalidates.
+        (self.dir / "b.txt").write_text("world!", encoding="utf-8")
+        # Some filesystems have second-granularity mtime — bump explicitly.
+        os.utime(self.dir, None)
+        self.assertEqual(_path_size(self.dir), 11)
+
+
 class FullCleanupRoundtripTests(unittest.TestCase):
     """End-to-end: post-hardening, the safe preset still works as before."""
 

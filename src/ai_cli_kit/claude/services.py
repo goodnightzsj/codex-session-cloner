@@ -481,11 +481,42 @@ def _write_json(path: Path, payload: Dict[str, object]) -> None:
         fh.write(serialized)
 
 
+# (path_str, mtime_ns) → cached total size. Invalidates on mtime change so
+# file-system mutations outside this process don't produce stale readings.
+_PATH_SIZE_CACHE: Dict[Tuple[str, int], int] = {}
+
+
 def _path_size(path: Path) -> int:
+    """Return total on-disk size of ``path`` (file OR recursive directory).
+
+    Claude's TUI rebuilds the plan on EVERY keypress that toggles a target
+    (Space/Enter/1-9/a/f/n/b/d). Each rebuild calls ``_path_size`` for 8
+    separate targets, and ``projects_dir`` / ``sessions_dir`` can easily
+    contain thousands of Claude Code rollout files. Without caching, each
+    toggle triggered a full ``rglob("*")`` walk per target — on a loaded
+    home directory that meant a visibly laggy TUI.
+
+    Cache key is ``(str(path), st_mtime_ns)``: the mtime check is a single
+    ``stat()`` on the top-level path (Git / editors / cleanup tools update
+    the directory's mtime when its contents change), so file-system churn
+    outside this process still invalidates the cache. A single mis-predict
+    (external tool added a file but didn't bump mtime) is rare and benign
+    — worst case the user sees a stale size until the dir's mtime updates.
+    """
     if not path.exists():
         return 0
     if path.is_file():
         return path.stat().st_size
+
+    try:
+        mtime_ns = path.stat().st_mtime_ns
+    except OSError:
+        mtime_ns = 0
+    cache_key = (str(path), mtime_ns)
+    cached = _PATH_SIZE_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
     total = 0
     for child in path.rglob("*"):
         if child.is_file():
@@ -493,6 +524,14 @@ def _path_size(path: Path) -> int:
                 total += child.stat().st_size
             except OSError:
                 continue
+
+    _PATH_SIZE_CACHE[cache_key] = total
+    # Trim cache if it grows unreasonably (different targets, repeated runs).
+    if len(_PATH_SIZE_CACHE) > 64:
+        # Drop everything; fresh computation costs less than LRU bookkeeping
+        # when the cache is effectively saturated.
+        _PATH_SIZE_CACHE.clear()
+        _PATH_SIZE_CACHE[cache_key] = total
     return total
 
 
