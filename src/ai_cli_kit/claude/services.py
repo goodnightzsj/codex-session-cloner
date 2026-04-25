@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -483,7 +484,12 @@ def _write_json(path: Path, payload: Dict[str, object]) -> None:
 
 # (path_str, mtime_ns) → cached total size. Invalidates on mtime change so
 # file-system mutations outside this process don't produce stale readings.
+# Wrapped behind ``_PATH_SIZE_CACHE_LOCK`` so the read-modify-write sequence
+# (clear-when-full + insert) is atomic — the CLI is currently single-threaded
+# but the lock costs effectively nothing and protects future callers that may
+# call from worker threads (e.g. async batch operations).
 _PATH_SIZE_CACHE: Dict[Tuple[str, int], int] = {}
+_PATH_SIZE_CACHE_LOCK = threading.Lock()
 
 
 def _path_size(path: Path) -> int:
@@ -502,6 +508,9 @@ def _path_size(path: Path) -> int:
     outside this process still invalidates the cache. A single mis-predict
     (external tool added a file but didn't bump mtime) is rare and benign
     — worst case the user sees a stale size until the dir's mtime updates.
+
+    The expensive ``rglob`` walk happens **outside** the lock so cache reads
+    don't block on a slow disk; only the dict mutations are serialised.
     """
     if not path.exists():
         return 0
@@ -513,7 +522,9 @@ def _path_size(path: Path) -> int:
     except OSError:
         mtime_ns = 0
     cache_key = (str(path), mtime_ns)
-    cached = _PATH_SIZE_CACHE.get(cache_key)
+
+    with _PATH_SIZE_CACHE_LOCK:
+        cached = _PATH_SIZE_CACHE.get(cache_key)
     if cached is not None:
         return cached
 
@@ -525,12 +536,12 @@ def _path_size(path: Path) -> int:
             except OSError:
                 continue
 
-    _PATH_SIZE_CACHE[cache_key] = total
-    # Trim cache if it grows unreasonably (different targets, repeated runs).
-    if len(_PATH_SIZE_CACHE) > 64:
-        # Drop everything; fresh computation costs less than LRU bookkeeping
-        # when the cache is effectively saturated.
-        _PATH_SIZE_CACHE.clear()
+    with _PATH_SIZE_CACHE_LOCK:
+        # Trim cache if it grows unreasonably (different targets, repeated runs).
+        # Drop everything when over budget; fresh computation costs less than
+        # LRU bookkeeping when the cache is effectively saturated.
+        if len(_PATH_SIZE_CACHE) > 64:
+            _PATH_SIZE_CACHE.clear()
         _PATH_SIZE_CACHE[cache_key] = total
     return total
 

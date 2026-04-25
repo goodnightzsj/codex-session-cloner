@@ -245,6 +245,47 @@ class PathSizeCacheTests(unittest.TestCase):
         self.assertEqual(len(_PATH_SIZE_CACHE), cache_size_before,
                          "second call added a new cache entry — cache miss when it should hit")
 
+    def test_cache_concurrent_access_is_safe(self) -> None:
+        """Concurrent ``_path_size`` calls must not corrupt the cache.
+
+        Without the lock, two threads racing through the
+        ``if len > 64: clear; insert`` sequence could lose entries or
+        produce inconsistent state. The lock keeps the read-modify-write
+        atomic. Test spins 8 threads each computing 10 different paths;
+        any data race (cache key visible without value, KeyError, etc.)
+        would surface as an exception.
+        """
+        import threading
+        from ai_cli_kit.claude.services import _PATH_SIZE_CACHE, _path_size
+
+        # 80 distinct directories, enough to push past the 64-entry cap.
+        dirs = []
+        for idx in range(80):
+            d = self.dir / f"sub-{idx}"
+            d.mkdir()
+            (d / "f.txt").write_text("x" * (idx + 1), encoding="utf-8")
+            dirs.append(d)
+
+        errors: list[BaseException] = []
+
+        def worker():
+            try:
+                for d in dirs:
+                    _path_size(d)
+            except BaseException as exc:  # noqa: BLE001
+                errors.append(exc)
+
+        threads = [threading.Thread(target=worker) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        self.assertEqual(errors, [], f"concurrent _path_size raised: {errors}")
+        # After the storm, cache should still hold valid entries (size > 0)
+        # for some subset; bookkeeping survived without exception.
+        self.assertGreater(len(_PATH_SIZE_CACHE), 0)
+
     def test_cache_invalidates_on_mtime_change(self) -> None:
         from ai_cli_kit.claude.services import _path_size
 
