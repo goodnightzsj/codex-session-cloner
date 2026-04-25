@@ -1409,5 +1409,47 @@ class CoreWorkflowTests(unittest.TestCase):
             )
 
 
+class RglobOSErrorHardeningTests(unittest.TestCase):
+    """Lock OSError protection on cross-platform rglob hot paths.
+
+    Why: pathlib.Path.rglob can raise OSError mid-walk if a subdirectory is
+    deleted by another process (Codex itself, AV scanner, sync client). The
+    TUI session list and bundle browser must degrade gracefully — empty
+    result, not crash.
+    """
+
+    def test_iter_session_files_swallows_rglob_oserror(self) -> None:
+        from unittest.mock import patch
+
+        tmpdir = tempfile.mkdtemp()
+        try:
+            home = Path(tmpdir) / "home"
+            (home / ".codex" / "sessions").mkdir(parents=True)
+            (home / ".codex" / "archived_sessions").mkdir(parents=True)
+            paths = CodexPaths(home=home, cwd=Path(tmpdir))
+
+            with patch("pathlib.Path.rglob", side_effect=OSError("ENOENT (simulated)")):
+                result = list(iter_session_files(paths))
+            self.assertEqual(result, [])
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_iter_bundle_directories_swallows_rglob_oserror(self) -> None:
+        from unittest.mock import patch
+
+        from ai_cli_kit.codex.stores.bundles import iter_bundle_directories_under_root
+
+        tmpdir = tempfile.mkdtemp()
+        try:
+            bundle_root = Path(tmpdir) / "bundles"
+            bundle_root.mkdir()
+
+            with patch("pathlib.Path.rglob", side_effect=OSError("ENOENT (simulated)")):
+                result = iter_bundle_directories_under_root(bundle_root)
+            self.assertEqual(result, [])
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -193,17 +193,23 @@ def iter_bundle_directories_under_root(bundle_root: Path) -> List[Path]:
 
     bundle_dirs: List[Path] = []
     seen_dirs: set[Path] = set()
-    for manifest_file in bundle_root.rglob("manifest.env"):
-        bundle_dir = manifest_file.parent
-        try:
-            relative_parts = bundle_dir.relative_to(bundle_root).parts
-        except ValueError:
-            continue
-        if any(part.startswith(".") for part in relative_parts):
-            continue
-        if bundle_dir not in seen_dirs:
-            bundle_dirs.append(bundle_dir)
-            seen_dirs.add(bundle_dir)
+    # rglob can raise OSError if a subdir under bundle_root is deleted by
+    # another process mid-walk. Return whatever we've collected so far rather
+    # than aborting the entire bundle list.
+    try:
+        for manifest_file in bundle_root.rglob("manifest.env"):
+            bundle_dir = manifest_file.parent
+            try:
+                relative_parts = bundle_dir.relative_to(bundle_root).parts
+            except ValueError:
+                continue
+            if any(part.startswith(".") for part in relative_parts):
+                continue
+            if bundle_dir not in seen_dirs:
+                bundle_dirs.append(bundle_dir)
+                seen_dirs.add(bundle_dir)
+    except OSError:
+        pass
     bundle_dirs.sort()
     return bundle_dirs
 

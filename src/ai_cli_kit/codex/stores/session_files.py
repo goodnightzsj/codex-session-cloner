@@ -30,10 +30,19 @@ def iter_session_files(paths: CodexPaths, *, active_only: bool = False) -> Itera
     not merge-sorted across boundaries.  Callers that need a globally-sorted
     stream should apply their own sort on the returned iterable.
     """
+    # rglob can raise OSError if a subdirectory is removed mid-walk by Codex
+    # itself or another tool. Treat the segment as empty rather than crashing
+    # the TUI session list / clone resolver.
     if paths.sessions_dir.exists():
-        yield from sorted(paths.sessions_dir.rglob("rollout-*.jsonl"))
+        try:
+            yield from sorted(paths.sessions_dir.rglob("rollout-*.jsonl"))
+        except OSError:
+            pass
     if not active_only and paths.archived_sessions_dir.exists():
-        yield from sorted(paths.archived_sessions_dir.rglob("rollout-*.jsonl"))
+        try:
+            yield from sorted(paths.archived_sessions_dir.rglob("rollout-*.jsonl"))
+        except OSError:
+            pass
 
 
 def session_id_from_filename(path: Path) -> Optional[str]:

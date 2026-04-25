@@ -353,14 +353,21 @@ def _iter_candidate_files(roots: Iterable[Path]) -> Iterator[Path]:
             seen.add(resolved)
             yield root
             continue
-        for child in root.rglob("*"):
-            if not child.is_file():
-                continue
-            resolved = child.resolve()
-            if resolved in seen:
-                continue
-            seen.add(resolved)
-            yield child
+        # rglob can raise OSError if ``root`` (or a subdir) is deleted by
+        # another process mid-walk. Skip the rest of THIS root and continue
+        # the outer iteration — we'd rather lose a few candidate files than
+        # crash an entire history-remap run.
+        try:
+            for child in root.rglob("*"):
+                if not child.is_file():
+                    continue
+                resolved = child.resolve()
+                if resolved in seen:
+                    continue
+                seen.add(resolved)
+                yield child
+        except OSError:
+            continue
 
 
 def _inspect_rewrite_count(path: Path, mappings: Dict[str, Tuple[str, str]]) -> int:
