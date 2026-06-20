@@ -19,6 +19,7 @@ from .presenters.reports import (
     print_dedupe_result,
     print_export_result,
     print_import_result,
+    print_provider_watch_event,
     print_repair_result,
     print_session_rows,
     print_validation_report,
@@ -30,6 +31,7 @@ from .services.dedupe import dedupe_clones
 from .services.exporting import export_active_desktop_all, export_cli_all, export_desktop_all, export_session
 from .services.importing import import_desktop_all, import_session
 from .services.repair import repair_desktop
+from .services.watch import DEFAULT_WATCH_INTERVAL_SECONDS, iter_provider_watch_events
 from .support import build_single_export_root
 
 
@@ -73,6 +75,28 @@ def create_parser() -> argparse.ArgumentParser:
     clone_parser = subparsers.add_parser("clone-provider", help="Clone active sessions to the target provider")
     clone_parser.add_argument("target_provider", nargs="?", default="", help="Optional provider override")
     clone_parser.add_argument("--dry-run", action="store_true")
+
+    watch_parser = subparsers.add_parser(
+        "watch-provider",
+        help="Watch provider changes and clone active sessions automatically",
+    )
+    watch_parser.add_argument(
+        "--interval",
+        type=float,
+        default=DEFAULT_WATCH_INTERVAL_SECONDS,
+        help=f"Polling interval in seconds (default: {DEFAULT_WATCH_INTERVAL_SECONDS:g})",
+    )
+    watch_parser.add_argument("--dry-run", action="store_true")
+    watch_parser.add_argument(
+        "--no-initial-sync",
+        action="store_true",
+        help="Only sync after a provider change observed after startup",
+    )
+    watch_parser.add_argument(
+        "--once",
+        action="store_true",
+        help="Run one provider watch check and exit",
+    )
 
     clean_parser = subparsers.add_parser("clean-clones", help="Delete legacy unmarked clone files")
     clean_parser.add_argument("target_provider", nargs="?", default="", help="Optional provider override")
@@ -159,6 +183,27 @@ def run_cli(argv: Sequence[str], *, paths: Optional[CodexPaths] = None) -> int:
         )
     if args.command == "clone-provider":
         return print_clone_run_result(clone_to_provider(paths, target_provider=args.target_provider, dry_run=args.dry_run))
+    if args.command == "watch-provider":
+        if not args.once:
+            print(
+                f"Watching provider changes in {paths.config_file} every {args.interval:g}s. "
+                "Press Ctrl+C to stop.",
+                flush=True,
+            )
+        exit_code = 0
+        try:
+            for event in iter_provider_watch_events(
+                paths,
+                interval_seconds=args.interval,
+                dry_run=args.dry_run,
+                sync_on_start=not args.no_initial_sync,
+                max_checks=1 if args.once else None,
+            ):
+                exit_code = max(exit_code, print_provider_watch_event(event))
+        except KeyboardInterrupt:
+            print("\nStopped provider watch.")
+            return 130
+        return exit_code
     if args.command == "clean-clones":
         return print_cleanup_result(cleanup_clones(paths, target_provider=args.target_provider, dry_run=args.dry_run))
     if args.command == "clean-archived":

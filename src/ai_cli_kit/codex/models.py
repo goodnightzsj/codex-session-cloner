@@ -61,6 +61,16 @@ class CloneRunResult:
 
 
 @dataclass(frozen=True)
+class ProviderWatchEvent:
+    provider: str
+    previous_provider: str
+    checked_at: str
+    changed: bool
+    clone_result: Optional[CloneRunResult] = None
+    error: str = ""
+
+
+@dataclass(frozen=True)
 class CleanupResult:
     provider: str
     dry_run: bool

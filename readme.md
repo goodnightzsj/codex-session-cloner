@@ -103,7 +103,7 @@ python -m ai_cli_kit.claude
 
 ### 进 TUI 后
 
-无参运行 `./aik`（或 `python -m ai_cli_kit`）→ 用 ↑↓ 选 **Codex Session Toolkit** 或 **CC Clean** → Enter 进入对应工具的菜单。
+无参运行 `./aik`（或 `python -m ai_cli_kit`）→ 用 ↑↓ 选 **Codex Session Toolkit** 或 **CC Clean** → Enter 进入对应工具的菜单。进入 Codex 工具后，可在 **Repair / Maintenance** 分组里选择 **启动 provider 后台监听**，等价于在后台运行 `watch-provider` 并把日志写入 `~/.codex/provider-watch.log`。
 
 ## 常用命令
 
@@ -118,6 +118,7 @@ python -m ai_cli_kit.claude
 | 批量导出所有 Desktop 会话            | `aik codex export-desktop-all` |
 | 导入别人给的 Bundle                  | `aik codex import <session_id>` |
 | 切换 provider 后继续聊（克隆会话）   | `aik codex clone-provider` |
+| 自动监听 provider 切换并同步克隆     | `aik codex watch-provider` |
 | Desktop 列表里某会话不见了           | `aik codex repair-desktop` |
 | 归档对话太多想清理（不可恢复）       | `aik codex clean-archived --dry-run` → 加 `--yes` 执行 |
 
@@ -130,6 +131,7 @@ python -m ai_cli_kit.claude
 ./aik codex export-desktop-all         # 批量导出 Desktop 会话
 ./aik codex import <session_id>        # 导入 Bundle
 ./aik codex clone-provider             # 切换 provider 后克隆
+./aik codex watch-provider             # 监听 provider 变化并自动克隆
 ./aik codex clean-archived --dry-run   # 预览清理已归档对话
 ./aik codex clean-archived --yes       # 清理已归档对话及其 Desktop 元数据
 ./aik codex repair-desktop             # 修复 Desktop 可见性 / 索引
@@ -137,6 +139,25 @@ python -m ai_cli_kit.claude
 ```
 
 </details>
+
+#### `watch-provider` 后台监听
+
+`watch-provider` 会持续读取 `~/.codex/config.toml` 里的 `model_provider`。启动后默认先按当前 provider 同步一次，之后只有检测到 provider 变化时才再次调用现有的 `clone-provider` 逻辑；克隆逻辑本身是幂等的，已同步过的会话会跳过。
+
+常用参数：
+
+```bash
+./aik codex watch-provider --interval 2          # 每 2 秒检查一次（默认）
+./aik codex watch-provider --no-initial-sync     # 启动时不补同步，只监听后续切换
+./aik codex watch-provider --dry-run             # 只预览 provider 变化时会克隆什么
+./aik codex watch-provider --once                # 执行一次检查后退出，适合脚本验证
+```
+
+macOS / Linux 想挂到后台，可以把日志重定向到 Codex 目录：
+
+```bash
+nohup ./aik codex watch-provider >> ~/.codex/provider-watch.log 2>&1 &
+```
 
 #### `clean-archived` 清理范围
 
