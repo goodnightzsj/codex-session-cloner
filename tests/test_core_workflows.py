@@ -1281,6 +1281,61 @@ class CoreWorkflowTests(unittest.TestCase):
             ]
             self.assertEqual(len(cloned_files), 1)
 
+    def test_clone_to_provider_normalizes_scalar_message_content(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir) / "workspace"
+            home = Path(tmpdir) / "home"
+            workspace.mkdir()
+            write_config(home, "target-provider")
+            original_id = "16111111-1111-1111-1111-111111111111"
+            session_file = write_session(
+                home,
+                original_id,
+                provider="old-provider",
+                source="vscode",
+                originator="Codex Desktop",
+                cwd=workspace,
+            )
+            with session_file.open("a", encoding="utf-8") as fh:
+                fh.write(
+                    json.dumps(
+                        {
+                            "timestamp": "2026-04-10T10:06:30Z",
+                            "type": "response_item",
+                            "payload": {
+                                "type": "message",
+                                "role": "user",
+                                "content": "legacy scalar prompt",
+                            },
+                        },
+                        separators=(",", ":"),
+                    )
+                    + "\n"
+                )
+            paths = CodexPaths(home=home, cwd=workspace)
+
+            result = clone_to_provider(paths, target_provider="target-provider")
+
+            self.assertEqual(result.stats["cloned"], 1)
+            clone_file = next(
+                path
+                for path in iter_session_files(paths, active_only=True)
+                if read_session_payload(path).get("cloned_from") == original_id
+            )
+            scalar_content = None
+            with clone_file.open("r", encoding="utf-8") as fh:
+                for raw in fh:
+                    obj = json.loads(raw)
+                    payload = obj.get("payload", {})
+                    if isinstance(payload, dict) and payload.get("content") == "legacy scalar prompt":
+                        self.fail("clone preserved scalar message content")
+                    if isinstance(payload, dict) and payload.get("role") == "user":
+                        content = payload.get("content")
+                        if isinstance(content, list) and content and content[0].get("text") == "legacy scalar prompt":
+                            scalar_content = content
+
+            self.assertEqual(scalar_content, [{"type": "input_text", "text": "legacy scalar prompt"}])
+
     def test_provider_watch_initial_sync_clones_current_provider(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             workspace = Path(tmpdir) / "workspace"

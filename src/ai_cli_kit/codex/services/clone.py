@@ -59,6 +59,42 @@ def build_clone_index(
     return cloned_from_ids
 
 
+def _message_content_part_type(role: object) -> str:
+    return "output_text" if role == "assistant" else "input_text"
+
+
+def _normalize_message_content_value(value: object, role: object) -> tuple[object, bool]:
+    if isinstance(value, list):
+        return value, False
+    if isinstance(value, dict):
+        return [value], True
+    if value is None:
+        return [], True
+    return [{"type": _message_content_part_type(role), "text": str(value)}], True
+
+
+def _normalize_message_content_record(obj: dict) -> tuple[dict, bool]:
+    payload = obj.get("payload")
+    if not isinstance(payload, dict) or "content" not in payload:
+        return obj, False
+
+    is_message_payload = obj.get("type") == "message" or (
+        obj.get("type") == "response_item" and payload.get("type") == "message"
+    )
+    if not is_message_payload:
+        return obj, False
+
+    normalized_content, changed = _normalize_message_content_value(payload.get("content"), payload.get("role"))
+    if not changed:
+        return obj, False
+
+    normalized_payload = dict(payload)
+    normalized_payload["content"] = normalized_content
+    normalized_obj = dict(obj)
+    normalized_obj["payload"] = normalized_payload
+    return normalized_obj, True
+
+
 def clone_session_file(
     paths: CodexPaths,
     session_file: Path,
@@ -118,9 +154,15 @@ def clone_session_file(
         return CloneFileResult("skipped_exists", "Target file collision")
 
     output_lines = []
-    for idx, (raw, _) in enumerate(records):
+    for idx, (raw, obj) in enumerate(records):
         if idx == meta_index:
             output_lines.append(json.dumps(session_meta, ensure_ascii=False, separators=(",", ":")) + "\n")
+        elif obj is not None:
+            normalized_obj, changed = _normalize_message_content_record(obj)
+            if changed:
+                output_lines.append(json.dumps(normalized_obj, ensure_ascii=False, separators=(",", ":")) + "\n")
+            else:
+                output_lines.append(raw)
         else:
             output_lines.append(raw)
 
