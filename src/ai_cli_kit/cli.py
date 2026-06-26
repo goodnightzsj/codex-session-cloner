@@ -126,6 +126,7 @@ def _print_top_help(stream=None) -> None:
         "",
         "Examples:",
         f"  {APP_COMMAND} codex clone-provider",
+        f"  {APP_COMMAND} codex watch-provider",
         f"  {APP_COMMAND} codex export-desktop-all --dry-run",
         f"  {APP_COMMAND} claude plan",
         f"  {APP_COMMAND} claude clean --preset safe --yes",

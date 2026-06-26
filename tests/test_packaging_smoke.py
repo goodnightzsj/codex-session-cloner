@@ -72,6 +72,7 @@ class PackagingSmokeTests(unittest.TestCase):
             {
                 "clone",
                 "clone_dry",
+                "watch_provider",
                 "clean",
                 "clean_archived",
                 "clean_archived_dry",
@@ -101,6 +102,7 @@ class PackagingSmokeTests(unittest.TestCase):
         )
         self.assertIn(f"usage: {APP_COMMAND}", result.stdout)
         self.assertIn("clone-provider", result.stdout)
+        self.assertIn("watch-provider", result.stdout)
 
     def test_module_version_matches_package_version(self) -> None:
         result = subprocess.run(

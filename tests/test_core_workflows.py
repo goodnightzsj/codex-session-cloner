@@ -24,6 +24,7 @@ from ai_cli_kit.codex.services.dedupe import dedupe_clones  # noqa: E402
 from ai_cli_kit.codex.services.exporting import export_active_desktop_all, export_session  # noqa: E402
 from ai_cli_kit.codex.services.importing import import_desktop_all, import_session  # noqa: E402
 from ai_cli_kit.codex.services.repair import repair_desktop  # noqa: E402
+from ai_cli_kit.codex.services.watch import check_provider_watch, iter_provider_watch_events  # noqa: E402
 from ai_cli_kit.codex.support import backup_operation_slug, machine_label_to_key  # noqa: E402
 from ai_cli_kit.codex.stores.bundles import collect_known_bundle_summaries, latest_distinct_bundle_summaries  # noqa: E402
 from ai_cli_kit.codex.stores.index import load_existing_index, upsert_session_index  # noqa: E402
@@ -1279,6 +1280,101 @@ class CoreWorkflowTests(unittest.TestCase):
                 path for path in sessions if read_session_payload(path).get("cloned_from") == original_id
             ]
             self.assertEqual(len(cloned_files), 1)
+
+    def test_provider_watch_initial_sync_clones_current_provider(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir) / "workspace"
+            home = Path(tmpdir) / "home"
+            workspace.mkdir()
+            write_config(home, "target-provider")
+            original_id = "13111111-1111-1111-1111-111111111111"
+            write_session(
+                home,
+                original_id,
+                provider="old-provider",
+                source="cli",
+                originator="codex_cli_rs",
+                cwd=workspace,
+            )
+            paths = CodexPaths(home=home, cwd=workspace)
+
+            event = check_provider_watch(paths, sync_on_start=True)
+
+            self.assertEqual(event.provider, "target-provider")
+            self.assertFalse(event.changed)
+            self.assertIsNotNone(event.clone_result)
+            self.assertEqual(event.clone_result.stats["cloned"], 1)
+            cloned_files = [
+                path
+                for path in iter_session_files(paths, active_only=True)
+                if read_session_payload(path).get("cloned_from") == original_id
+            ]
+            self.assertEqual(len(cloned_files), 1)
+
+    def test_provider_watch_syncs_when_provider_changes_after_startup(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir) / "workspace"
+            home = Path(tmpdir) / "home"
+            workspace.mkdir()
+            write_config(home, "provider-a")
+            original_id = "14111111-1111-1111-1111-111111111111"
+            write_session(
+                home,
+                original_id,
+                provider="legacy-provider",
+                source="cli",
+                originator="codex_cli_rs",
+                cwd=workspace,
+            )
+            paths = CodexPaths(home=home, cwd=workspace)
+
+            events = iter_provider_watch_events(
+                paths,
+                interval_seconds=0.01,
+                sync_on_start=False,
+                max_checks=2,
+                sleep_func=lambda _interval: write_config(home, "provider-b"),
+            )
+            first_event = next(events)
+            second_event = next(events)
+
+            self.assertEqual(first_event.provider, "provider-a")
+            self.assertIsNone(first_event.clone_result)
+            self.assertTrue(second_event.changed)
+            self.assertEqual(second_event.previous_provider, "provider-a")
+            self.assertEqual(second_event.provider, "provider-b")
+            self.assertIsNotNone(second_event.clone_result)
+            self.assertEqual(second_event.clone_result.stats["cloned"], 1)
+            cloned_payloads = [
+                read_session_payload(path)
+                for path in iter_session_files(paths, active_only=True)
+                if read_session_payload(path).get("cloned_from") == original_id
+            ]
+            self.assertEqual(len(cloned_payloads), 1)
+            self.assertEqual(cloned_payloads[0]["model_provider"], "provider-b")
+
+    def test_watch_provider_once_no_initial_sync_cli_returns_without_cloning(self) -> None:
+        from ai_cli_kit.codex.commands import run_cli
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir) / "workspace"
+            home = Path(tmpdir) / "home"
+            workspace.mkdir()
+            write_config(home, "target-provider")
+            write_session(
+                home,
+                "15111111-1111-1111-1111-111111111111",
+                provider="old-provider",
+                source="cli",
+                originator="codex_cli_rs",
+                cwd=workspace,
+            )
+            paths = CodexPaths(home=home, cwd=workspace)
+
+            exit_code = run_cli(["watch-provider", "--once", "--no-initial-sync"], paths=paths)
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(len(list(iter_session_files(paths, active_only=True))), 1)
 
     def test_export_validate_and_import_roundtrip_updates_desktop_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

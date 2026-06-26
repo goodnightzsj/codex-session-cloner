@@ -96,6 +96,7 @@ class AikDispatchTests(unittest.TestCase):
         )
         self.assertIn("usage: codex-session-toolkit", result.stdout)
         self.assertIn("clone-provider", result.stdout)
+        self.assertIn("watch-provider", result.stdout)
 
     def test_dispatch_to_claude_help_uses_claude_parser(self) -> None:
         result = subprocess.run(

@@ -9,8 +9,10 @@ argument compatibility and command dispatch.
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, List, Optional, Sequence, Tuple
 
 from .. import APP_COMMAND
@@ -115,6 +117,7 @@ class BundleCategoryFolderOption:
 TUI_ACTION_NOTES = {
     "clone": ["会为非当前 provider 的会话生成带血缘信息的新副本。"],
     "clone_dry": ["只预览将创建哪些 clone，不写入任何文件。"],
+    "watch_provider": ["在后台监听 provider 变化，并自动复用 clone-provider 同步会话。", "日志写入 ~/.codex/provider-watch.log。"],
     "clean": ["删除早期版本生成、但没有 cloned_from 标记的旧副本。", "执行前需要输入 DELETE 二次确认。"],
     "clean_dry": ["只预览哪些旧副本会被删除。"],
     "clean_archived": ["删除已归档的 Codex 线程，并同步清理 index / threads / global state。", "不会创建备份；建议先 dry-run，执行前需要输入 DELETE 二次确认。"],
@@ -166,6 +169,7 @@ def build_tui_menu_actions() -> List[TuiMenuAction]:
         TuiMenuAction("import_desktop_all", "m", "批量导入 Bundle 为会话", "bundle", ("import-desktop-all",)),
         TuiMenuAction("clone", "1", "克隆到当前 provider", "repair", ("clone-provider",)),
         TuiMenuAction("clone_dry", "2", "模拟克隆（Dry-run）", "repair", ("clone-provider", "--dry-run"), is_dry_run=True),
+        TuiMenuAction("watch_provider", "w", "启动 provider 后台监听", "repair", ("watch-provider",)),
         TuiMenuAction("clean", "3", "清理旧版无标记副本", "repair", ("clean-clones",), is_dangerous=True),
         TuiMenuAction("clean_dry", "4", "模拟清理旧版副本", "repair", ("clean-clones", "--dry-run"), is_dangerous=True, is_dry_run=True),
         TuiMenuAction("clean_archived", "5", "清理已归档线程", "repair", ("clean-archived", "--yes"), is_dangerous=True),
@@ -471,6 +475,57 @@ class ToolkitTuiApp:
         except ToolkitError as exc:
             self._print_centered_text(style_text(str(exc), Ansi.RED))
             return 1
+
+    def _watch_provider_env(self) -> dict:
+        env = os.environ.copy()
+        src_root = str(Path(__file__).resolve().parents[3])
+        existing_pythonpath = env.get("PYTHONPATH", "")
+        if src_root not in existing_pythonpath.split(os.pathsep):
+            env["PYTHONPATH"] = src_root if not existing_pythonpath else f"{src_root}{os.pathsep}{existing_pythonpath}"
+        env.setdefault("PYTHONUTF8", "1")
+        env.setdefault("PYTHONIOENCODING", "utf-8")
+        env.pop("AIK_HUB_ACTIVE", None)
+        return env
+
+    def _start_watch_provider_background(self) -> Tuple[int, Path]:
+        self.paths.code_dir.mkdir(parents=True, exist_ok=True)
+        log_file = self.paths.code_dir / "provider-watch.log"
+        command = [sys.executable, "-m", "ai_cli_kit.codex", "watch-provider"]
+        popen_kwargs = {}
+        if os.name == "nt":
+            popen_kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        else:
+            popen_kwargs["start_new_session"] = True
+        with log_file.open("a", encoding="utf-8") as log_fh:
+            process = subprocess.Popen(
+                command,
+                cwd=str(self.paths.cwd),
+                env=self._watch_provider_env(),
+                stdin=subprocess.DEVNULL,
+                stdout=log_fh,
+                stderr=subprocess.STDOUT,
+                **popen_kwargs,
+            )
+        return process.pid, log_file
+
+    def _run_watch_provider_action(self, cli_args: Sequence[str]) -> None:
+        box_width = self._print_branded_header("Provider Watch", "后台监听 provider 变化并自动同步 clone。")
+        info_lines = [
+            f"{style_text('执行方式', Ansi.DIM)} : 后台启动",
+            f"{style_text('命令', Ansi.DIM)}     : {self._cli_preview(cli_args)}",
+            f"{style_text('配置文件', Ansi.DIM)} : {style_text(self.context.config_path, Ansi.DIM)}",
+            f"{style_text('日志', Ansi.DIM)}     : ~/.codex/provider-watch.log",
+        ]
+        self._print_centered_box(render_box(info_lines, width=box_width, border_codes=(Ansi.DIM, Ansi.GREEN)))
+        print("")
+        try:
+            pid, log_file = self._start_watch_provider_background()
+        except OSError as exc:
+            self._print_centered_text(style_text(f"启动失败：{exc}", Ansi.BOLD, Ansi.RED))
+        else:
+            self._print_centered_text(style_text(f"已启动 provider watch，PID: {pid}", Ansi.BOLD, Ansi.GREEN))
+            self._print_centered_text(style_text(f"日志文件：{log_file}", Ansi.DIM))
+        self._await_input(style_text("\n按 Enter 返回菜单...", Ansi.DIM))
 
     def _action_color(self, menu_action: TuiMenuAction) -> str:
         if menu_action.is_dangerous and not menu_action.is_dry_run:
@@ -1326,6 +1381,7 @@ class ToolkitTuiApp:
             "",
             style_text("常用 CLI（更完整的工具链能力）：", Ansi.BOLD),
             "  clone-provider                克隆活动会话到当前 provider",
+            "  watch-provider                监听 provider 变化并自动同步克隆",
             "  clean-archived --dry-run      预览清理已归档 Codex 线程",
             "  clean-clones                  清理旧版无标记副本",
             "  list [pattern]                列出本机会话",
@@ -1346,6 +1402,7 @@ class ToolkitTuiApp:
             "",
             style_text("示例：", Ansi.BOLD),
             f"  {self._cli_preview(('clone-provider', '--dry-run'))}",
+            f"  {self._cli_preview(('watch-provider',))}",
             f"  {self._cli_preview(('list-bundles', '--source', 'desktop'))}",
             f"  {self._cli_preview(('validate-bundles', '--source', 'desktop'))}",
             f"  {self._cli_preview(('export-cli-all', '--dry-run'))}",
@@ -1619,6 +1676,9 @@ class ToolkitTuiApp:
                 runner=lambda: run_clone_mode(target_provider=self.context.target_provider, dry_run=True),
                 danger=False,
             )
+            return
+        if choice_id == "watch_provider":
+            self._run_watch_provider_action(chosen_action.cli_args)
             return
         if choice_id == "clean":
             if not self._confirm_dangerous_action(chosen_action.cli_args):

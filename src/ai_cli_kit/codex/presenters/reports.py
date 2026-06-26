@@ -15,6 +15,7 @@ from ..models import (
     DedupeResult,
     ExportResult,
     ImportResult,
+    ProviderWatchEvent,
     RepairResult,
     SessionSummary,
     ValidationReport,
@@ -95,6 +96,24 @@ def print_clone_run_result(result: CloneRunResult) -> int:
     if result.dry_run:
         print("\nThis was a DRY RUN. No files were created.")
     return 0
+
+
+def print_provider_watch_event(event: ProviderWatchEvent) -> int:
+    if event.error:
+        print(f"[{event.checked_at}] [!] {event.error}", file=sys.stderr, flush=True)
+        return 1
+
+    if event.clone_result is None:
+        return 0
+
+    if event.previous_provider:
+        print(
+            f"\n[{event.checked_at}] Provider changed: {event.previous_provider} -> {event.provider}",
+            flush=True,
+        )
+    else:
+        print(f"\n[{event.checked_at}] Initial provider sync: {event.provider}", flush=True)
+    return print_clone_run_result(event.clone_result)
 
 
 def print_cleanup_result(result: CleanupResult) -> int:
